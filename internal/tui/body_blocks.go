@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -13,7 +14,10 @@ const (
 	issueBodyHeadingBlock
 )
 
-const issueBodyHeadingMarker = "▾"
+const (
+	issueBodyHeadingMarker          = "▾"
+	issueBodyCollapsedHeadingMarker = "▸"
+)
 
 var issueBodyHeadingStyles = []lipgloss.Style{
 	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("57")).Bold(true),
@@ -30,6 +34,12 @@ type issueBodyBlock struct {
 	Text    string
 	RawLine string
 	Lines   []string
+}
+
+type issueBodySectionID string
+
+func issueBodyHeadingSectionID(block issueBodyBlock, ordinal int) issueBodySectionID {
+	return issueBodySectionID(fmt.Sprintf("heading:%d:%d:%s", ordinal, block.Level, block.RawLine))
 }
 
 func parseIssueBodyBlocks(body string) []issueBodyBlock {
@@ -91,17 +101,39 @@ func parseIssueBodyBlocks(body string) []issueBodyBlock {
 }
 
 func renderIssueBodyLines(body string, width int) []string {
+	return renderIssueBodyLinesWithCollapse(body, width, nil)
+}
+
+func renderIssueBodyLinesWithCollapse(body string, width int, isCollapsed func(issueBodySectionID) bool) []string {
 	blocks := parseIssueBodyBlocks(body)
 	if len(blocks) == 0 {
 		return nil
 	}
 
 	var lines []string
+	headingOrdinal := 0
+	collapsedLevel := 0
 	for _, block := range blocks {
 		switch block.Kind {
 		case issueBodyHeadingBlock:
-			lines = append(lines, renderIssueBodyHeadingLines(block, width)...)
+			headingOrdinal++
+			if collapsedLevel > 0 {
+				if block.Level > collapsedLevel {
+					continue
+				}
+				collapsedLevel = 0
+			}
+
+			sectionID := issueBodyHeadingSectionID(block, headingOrdinal)
+			collapsed := isCollapsed != nil && isCollapsed(sectionID)
+			lines = append(lines, renderIssueBodyHeadingLinesWithMarker(block, width, headingMarker(collapsed))...)
+			if collapsed {
+				collapsedLevel = block.Level
+			}
 		case issueBodyTextBlock:
+			if collapsedLevel > 0 {
+				continue
+			}
 			lines = append(lines, wrapText(strings.Join(block.Lines, "\n"), width)...)
 		}
 	}
@@ -109,8 +141,12 @@ func renderIssueBodyLines(body string, width int) []string {
 }
 
 func renderIssueBodyHeadingLines(block issueBodyBlock, width int) []string {
+	return renderIssueBodyHeadingLinesWithMarker(block, width, issueBodyHeadingMarker)
+}
+
+func renderIssueBodyHeadingLinesWithMarker(block issueBodyBlock, width int, marker string) []string {
 	width = max(1, width)
-	prefix := issueBodyHeadingMarker + " "
+	prefix := marker + " "
 	continuationPrefix := strings.Repeat(" ", lipgloss.Width(prefix))
 	text := strings.TrimSpace(block.Text)
 	contentWidth := max(1, width-lipgloss.Width(prefix))
@@ -129,6 +165,13 @@ func renderIssueBodyHeadingLines(block issueBodyBlock, width int) []string {
 		lines = append(lines, style.Render(truncate(linePrefix+line, width)))
 	}
 	return lines
+}
+
+func headingMarker(collapsed bool) string {
+	if collapsed {
+		return issueBodyCollapsedHeadingMarker
+	}
+	return issueBodyHeadingMarker
 }
 
 func issueBodyHeadingStyle(level int) lipgloss.Style {

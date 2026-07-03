@@ -89,6 +89,106 @@ func TestListWindowStartKeepsSelectionVisible(t *testing.T) {
 	}
 }
 
+func TestSectionCollapseStateDefaultsExpandedAndIsScopedByIssue(t *testing.T) {
+	body1 := strings.TrimSpace(`# Goal
+Issue one details
+## Nested
+Nested details
+# Next
+Next details`)
+	body2 := strings.Replace(body1, "Issue one details", "Issue two details", 1)
+	model := NewModel([]issues.Issue{
+		{ID: 11, Title: "one", Body: body1, State: "open"},
+		{ID: 22, Title: "two", Body: body2, State: "open"},
+	}, "./issues.db").WithSize(90, 18)
+	sectionID := headingSectionIDAt(t, body1, 1)
+
+	if model.sectionCollapsed(11, sectionID) {
+		t.Fatal("sections should be expanded by default")
+	}
+	text := stripANSI(strings.Join(model.detailLines(80), "\n"))
+	for _, want := range []string{"▾ Goal", "Issue one details", "Nested details", "▾ Next", "Next details"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expanded detail missing %q:\n%s", want, text)
+		}
+	}
+
+	model.setSelectedSectionCollapsed(sectionID, true)
+	text = stripANSI(strings.Join(model.detailLines(80), "\n"))
+	for _, want := range []string{"▸ Goal", "▾ Next", "Next details"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("collapsed detail missing %q:\n%s", want, text)
+		}
+	}
+	for _, hidden := range []string{"Issue one details", "Nested details"} {
+		if strings.Contains(text, hidden) {
+			t.Fatalf("collapsed detail unexpectedly included %q:\n%s", hidden, text)
+		}
+	}
+
+	model.setSelection(1)
+	text = stripANSI(strings.Join(model.detailLines(80), "\n"))
+	for _, want := range []string{"▾ Goal", "Issue two details", "Nested details"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("second issue should remain expanded and include %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "▸ Goal") {
+		t.Fatalf("collapse state leaked to second issue:\n%s", text)
+	}
+
+	model.setSelection(0)
+	model.setSelectedSectionCollapsed(sectionID, false)
+	text = stripANSI(strings.Join(model.detailLines(80), "\n"))
+	if !strings.Contains(text, "Issue one details") || strings.Contains(text, "▸ Goal") {
+		t.Fatalf("expanded section did not restore issue one body:\n%s", text)
+	}
+}
+
+func TestCollapseStateClampsDetailScrollAndSelectionReset(t *testing.T) {
+	longBody := "# Long\n" + strings.Join([]string{
+		"line 01", "line 02", "line 03", "line 04", "line 05",
+		"line 06", "line 07", "line 08", "line 09", "line 10",
+		"line 11", "line 12", "line 13", "line 14", "line 15",
+	}, "\n")
+	model := NewModel([]issues.Issue{
+		{ID: 1, Title: "long", Body: longBody, State: "open"},
+		{ID: 2, Title: "short", Body: "short body", State: "open"},
+	}, "./issues.db").WithSize(80, 8)
+	sectionID := headingSectionIDAt(t, longBody, 1)
+
+	model.detailScroll = model.maxDetailScroll()
+	if model.detailScroll == 0 {
+		t.Fatal("test fixture should produce scrollable detail content")
+	}
+	model.setSelectedSectionCollapsed(sectionID, true)
+	if maxScroll := model.maxDetailScroll(); model.detailScroll > maxScroll {
+		t.Fatalf("detailScroll = %d after collapse, want <= %d", model.detailScroll, maxScroll)
+	}
+
+	model.detailScroll = 999
+	model.setSelection(1)
+	if model.detailScroll != 0 {
+		t.Fatalf("detailScroll = %d after selected issue changed, want 0", model.detailScroll)
+	}
+}
+
+func headingSectionIDAt(t *testing.T, body string, ordinal int) issueBodySectionID {
+	t.Helper()
+	headingOrdinal := 0
+	for _, block := range parseIssueBodyBlocks(body) {
+		if block.Kind != issueBodyHeadingBlock {
+			continue
+		}
+		headingOrdinal++
+		if headingOrdinal == ordinal {
+			return issueBodyHeadingSectionID(block, headingOrdinal)
+		}
+	}
+	t.Fatalf("heading ordinal %d not found in body", ordinal)
+	return ""
+}
+
 func renderFixtureIssues() []issues.Issue {
 	closedAt := "2026-07-03T10:00:00Z"
 	blockedReason := "waiting for review from release owner"

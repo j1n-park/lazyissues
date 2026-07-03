@@ -43,15 +43,21 @@ var (
 
 // Model is the read-only lazyissues Bubble Tea model.
 type Model struct {
-	issues       []issues.Issue
-	dbPath       string
-	selected     int
-	detailScroll int
-	width        int
-	height       int
-	showHelp     bool
-	focus        focusPane
-	err          error
+	issues            []issues.Issue
+	dbPath            string
+	selected          int
+	detailScroll      int
+	width             int
+	height            int
+	showHelp          bool
+	focus             focusPane
+	err               error
+	collapsedSections map[issueSectionKey]bool
+}
+
+type issueSectionKey struct {
+	issueID   int64
+	sectionID issueBodySectionID
 }
 
 // NewModel creates a read-only TUI model for browsing issues.
@@ -69,6 +75,45 @@ func NewErrorModel(err error, dbPath string) Model {
 		dbPath: dbPath,
 		err:    err,
 	}
+}
+
+func (m Model) selectedIssue() (issues.Issue, bool) {
+	if len(m.issues) == 0 || m.selected < 0 || m.selected >= len(m.issues) {
+		return issues.Issue{}, false
+	}
+	return m.issues[m.selected], true
+}
+
+func (m Model) sectionCollapsed(issueID int64, sectionID issueBodySectionID) bool {
+	return m.collapsedSections[issueSectionKey{issueID: issueID, sectionID: sectionID}]
+}
+
+func (m *Model) setSelectedSectionCollapsed(sectionID issueBodySectionID, collapsed bool) {
+	issue, ok := m.selectedIssue()
+	if !ok {
+		m.detailScroll = 0
+		return
+	}
+	m.setSectionCollapsed(issue.ID, sectionID, collapsed)
+}
+
+func (m *Model) setSectionCollapsed(issueID int64, sectionID issueBodySectionID, collapsed bool) {
+	if sectionID == "" {
+		return
+	}
+	key := issueSectionKey{issueID: issueID, sectionID: sectionID}
+	if collapsed {
+		if m.collapsedSections == nil {
+			m.collapsedSections = make(map[issueSectionKey]bool)
+		}
+		m.collapsedSections[key] = true
+	} else if m.collapsedSections != nil {
+		delete(m.collapsedSections, key)
+		if len(m.collapsedSections) == 0 {
+			m.collapsedSections = nil
+		}
+	}
+	m.clampDetailScroll()
 }
 
 // WithSize returns a copy of the model sized for static rendering or tests.
@@ -184,7 +229,9 @@ func (m *Model) setSelection(index int) {
 	if index != m.selected {
 		m.selected = index
 		m.detailScroll = 0
+		return
 	}
+	m.clampDetailScroll()
 }
 
 func (m *Model) clampDetailScroll() {
@@ -319,10 +366,10 @@ func (m Model) renderDetail(width, height int) string {
 }
 
 func (m Model) detailLines(width int) []string {
-	if len(m.issues) == 0 || m.selected >= len(m.issues) {
+	issue, ok := m.selectedIssue()
+	if !ok {
 		return nil
 	}
-	issue := m.issues[m.selected]
 	lines := []string{
 		titleStyle.Render(truncate(fmt.Sprintf("#%d %s", issue.ID, issue.Title), width)),
 		fmt.Sprintf("%s %s", badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status))),
@@ -355,7 +402,9 @@ func (m Model) detailLines(width int) []string {
 	if body == "" {
 		lines = append(lines, subtleStyle.Render("(empty body)"))
 	} else {
-		lines = append(lines, renderIssueBodyLines(body, width)...)
+		lines = append(lines, renderIssueBodyLinesWithCollapse(body, width, func(sectionID issueBodySectionID) bool {
+			return m.sectionCollapsed(issue.ID, sectionID)
+		})...)
 	}
 	return lines
 }
@@ -397,7 +446,7 @@ func (m Model) contentMetrics() (int, int) {
 }
 
 func (m Model) maxDetailScroll() int {
-	if len(m.issues) == 0 {
+	if _, ok := m.selectedIssue(); !ok {
 		return 0
 	}
 	innerWidth, innerHeight := m.contentMetrics()
