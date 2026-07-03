@@ -18,7 +18,28 @@ It provides a lazygit-inspired split view with an issue list, issue detail pane,
 
 ## Install
 
-Install from this checkout into your `GOBIN`/`GOPATH/bin`:
+Install from this checkout into `~/.local/bin`:
+
+```sh
+./install.sh
+```
+
+Use `PREFIX` or `BINDIR` to choose a different install location:
+
+```sh
+PREFIX=/usr/local ./install.sh
+BINDIR=/tmp/bin ./install.sh
+```
+
+Uninstall the binary from the same location:
+
+```sh
+./uninstall.sh
+PREFIX=/usr/local ./uninstall.sh
+BINDIR=/tmp/bin ./uninstall.sh
+```
+
+You can also install with Go directly into your `GOBIN`/`GOPATH/bin`:
 
 ```sh
 go install ./cmd/lazyissues
