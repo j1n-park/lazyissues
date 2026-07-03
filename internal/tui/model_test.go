@@ -32,6 +32,7 @@ func TestViewRendersReadableStatusesAndHelp(t *testing.T) {
 		"enter/space toggle",
 		"a expand all",
 		"z collapse all",
+		"automatically refresh every second",
 		"Read-only browser: no issue actions mutate the database.",
 	} {
 		if !strings.Contains(view, want) {
@@ -276,7 +277,21 @@ func TestSectionKeysOnlyApplyWhenDetailPaneIsFocused(t *testing.T) {
 	}
 }
 
-func TestRefreshKeyReloadsIssuesAndPreservesSelectionByID(t *testing.T) {
+func TestInitSchedulesAutoRefreshWhenLoaderIsConfigured(t *testing.T) {
+	model := NewModel(nil, "./issues.db").WithIssueLoader(func(ctx context.Context) ([]issues.Issue, error) {
+		return nil, nil
+	})
+	if cmd := model.Init(); cmd == nil {
+		t.Fatal("Init should schedule automatic refresh when an issue loader is configured")
+	}
+
+	model = NewModel(nil, "./issues.db")
+	if cmd := model.Init(); cmd != nil {
+		t.Fatal("Init should not schedule automatic refresh without an issue loader")
+	}
+}
+
+func TestAutoRefreshTickReloadsIssuesAndPreservesSelectionByID(t *testing.T) {
 	model := NewModel([]issues.Issue{
 		{ID: 1, Title: "one", Body: "old", State: "open"},
 		{ID: 2, Title: "two", Body: "old", State: "open"},
@@ -288,12 +303,15 @@ func TestRefreshKeyReloadsIssuesAndPreservesSelectionByID(t *testing.T) {
 	}).WithSize(90, 18)
 	model.selected = 1
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	updated, cmd := model.Update(autoRefreshTickMsg{})
 	if cmd == nil {
-		t.Fatal("r should return a refresh command")
+		t.Fatal("automatic refresh tick should return a refresh command")
 	}
 	model = updated.(Model)
-	updated, _ = model.Update(cmd())
+	updated, cmd = model.Update(cmd())
+	if cmd == nil {
+		t.Fatal("refresh completion should schedule the next automatic refresh")
+	}
 	model = updated.(Model)
 
 	if got, want := len(model.issues), 2; got != want {
@@ -304,6 +322,26 @@ func TestRefreshKeyReloadsIssuesAndPreservesSelectionByID(t *testing.T) {
 	}
 	if got, want := model.issues[model.selected].Title, "two updated"; got != want {
 		t.Fatalf("selected issue title after refresh = %q, want %q", got, want)
+	}
+}
+
+func TestRKeyNoLongerRefreshesIssues(t *testing.T) {
+	called := false
+	model := NewModel([]issues.Issue{{ID: 1, Title: "one", Body: "old", State: "open"}}, "./issues.db").WithIssueLoader(func(ctx context.Context) ([]issues.Issue, error) {
+		called = true
+		return []issues.Issue{{ID: 2, Title: "refreshed", Body: "new", State: "open"}}, nil
+	}).WithSize(90, 18)
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model = updated.(Model)
+	if cmd != nil {
+		t.Fatal("r should no longer return a refresh command")
+	}
+	if called {
+		t.Fatal("r should not call the issue loader")
+	}
+	if got, want := model.issues[model.selected].Title, "one"; got != want {
+		t.Fatalf("selected issue title after r = %q, want %q", got, want)
 	}
 }
 

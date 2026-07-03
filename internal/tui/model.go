@@ -21,8 +21,9 @@ const (
 )
 
 const (
-	minListWidth = 28
-	maxListWidth = 52
+	minListWidth        = 28
+	maxListWidth        = 52
+	autoRefreshInterval = time.Second
 )
 
 var (
@@ -44,6 +45,8 @@ var (
 
 // LoadIssuesFunc reloads the issues currently displayed by the TUI.
 type LoadIssuesFunc func(context.Context) ([]issues.Issue, error)
+
+type autoRefreshTickMsg time.Time
 
 type refreshIssuesMsg struct {
 	issues []issues.Issue
@@ -103,6 +106,15 @@ func refreshIssuesCmd(loadIssues LoadIssuesFunc) tea.Cmd {
 	}
 }
 
+func scheduleAutoRefreshCmd(loadIssues LoadIssuesFunc) tea.Cmd {
+	if loadIssues == nil {
+		return nil
+	}
+	return tea.Tick(autoRefreshInterval, func(t time.Time) tea.Msg {
+		return autoRefreshTickMsg(t)
+	})
+}
+
 func (m Model) selectedIssue() (issues.Issue, bool) {
 	if len(m.issues) == 0 || m.selected < 0 || m.selected >= len(m.issues) {
 		return issues.Issue{}, false
@@ -150,7 +162,7 @@ func (m Model) WithSize(width, height int) Model {
 	return m
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m Model) Init() tea.Cmd { return scheduleAutoRefreshCmd(m.loadIssues) }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -159,9 +171,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.clampDetailScroll()
 		return m, nil
+	case autoRefreshTickMsg:
+		return m, refreshIssuesCmd(m.loadIssues)
 	case refreshIssuesMsg:
 		m.applyRefresh(msg.issues, msg.err)
-		return m, nil
+		return m, scheduleAutoRefreshCmd(m.loadIssues)
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
@@ -169,8 +183,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.showHelp = !m.showHelp
 			return m, nil
-		case "r":
-			return m, refreshIssuesCmd(m.loadIssues)
 		case "tab":
 			m.toggleFocus()
 			return m, nil
@@ -646,12 +658,12 @@ func (m Model) footerLines(width int) []string {
 	if m.focus == focusDetail {
 		focus = "detail"
 	}
-	base := fmt.Sprintf("tab/h/l focus • j/k/↑/↓ navigate • pgup/pgdn/home/end • r refresh • enter/space toggle • a/z all • ? help • q quit • focus: %s", focus)
+	base := fmt.Sprintf("tab/h/l focus • j/k/↑/↓ navigate • pgup/pgdn/home/end • enter/space toggle • a/z all • ? help • q quit • focus: %s", focus)
 	lines := []string{helpStyle.Render(truncate(base, width))}
 	if m.showHelp {
 		lines = append(lines,
 			helpStyle.Render(truncate("List focus: move between issues. Detail focus: scroll selected issue body.", width)),
-			helpStyle.Render(truncate("Refresh: r reloads issues from the configured database.", width)),
+			helpStyle.Render(truncate("Issues automatically refresh every second from the configured database.", width)),
 			helpStyle.Render(truncate("Detail sections: enter/space toggle, [/] previous/next, a expand all, z collapse all.", width)),
 			helpStyle.Render(truncate("Read-only browser: no issue actions mutate the database.", width)),
 		)
