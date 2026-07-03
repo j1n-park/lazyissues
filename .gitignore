@@ -1,0 +1,17 @@
+# Local pi issue queue metadata
+.pi/
+
+# Go build artifacts
+/bin/
+/build/
+/dist/
+*.test
+*.out
+coverage.txt
+
+# Built lazyissues binaries
+lazyissues
+lazyissues.exe
+
+# Editor/OS files
+.DS_Store

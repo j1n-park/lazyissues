@@ -1,0 +1,266 @@
+package issues
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+// Issue is a local pi issue row loaded from .pi/issues.db.
+//
+// Newer pi schemas include Status, ParentID, Owner, BlockedReason, and ClosedAt.
+// Older databases may not have those columns; missing or NULL values are exposed as
+// the zero value for Status and nil pointers for nullable fields.
+type Issue struct {
+	ID            int64
+	Title         string
+	Body          string
+	State         string
+	Status        string
+	ParentID      *int64
+	Owner         *string
+	BlockedReason *string
+	CreatedAt     string
+	UpdatedAt     string
+	ClosedAt      *string
+}
+
+// Repository loads issues from a read-only SQLite database.
+type Repository struct {
+	path    string
+	db      *sql.DB
+	columns map[string]bool
+}
+
+// Open opens path as a read-only SQLite issue database and validates the issues table.
+func Open(path string) (*Repository, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, errors.New("issues database path is empty")
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve issues database path %q: %w", path, err)
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("issues database %q does not exist", path)
+		}
+		return nil, fmt.Errorf("inspect issues database %q: %w", path, err)
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("issues database %q is a directory", path)
+	}
+
+	db, err := sql.Open("sqlite3", readOnlyDSN(absPath))
+	if err != nil {
+		return nil, fmt.Errorf("open issues database %q: %w", path, err)
+	}
+
+	repo := &Repository{path: path, db: db}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open issues database %q read-only: %w", path, err)
+	}
+	if err := repo.validate(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return repo, nil
+}
+
+func readOnlyDSN(absPath string) string {
+	u := url.URL{Scheme: "file", Path: absPath}
+	q := u.Query()
+	q.Set("mode", "ro")
+	q.Set("_query_only", "1")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func (r *Repository) validate() error {
+	var name string
+	err := r.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'issues'`).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("issues database %q does not contain an issues table", r.path)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect issues database %q: %w", r.path, err)
+	}
+
+	columns, err := loadColumns(r.db)
+	if err != nil {
+		return fmt.Errorf("inspect issues table in %q: %w", r.path, err)
+	}
+
+	var missing []string
+	for _, column := range []string{"id", "title", "body", "state", "created_at", "updated_at"} {
+		if !columns[column] {
+			missing = append(missing, column)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("issues table in %q is missing required column(s): %s", r.path, strings.Join(missing, ", "))
+	}
+
+	r.columns = columns
+	return nil
+}
+
+func loadColumns(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(issues)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType sql.NullString
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			return nil, err
+		}
+		columns[strings.ToLower(name)] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return columns, nil
+}
+
+// Close closes the underlying database handle.
+func (r *Repository) Close() error {
+	if r == nil || r.db == nil {
+		return nil
+	}
+	return r.db.Close()
+}
+
+// List returns all issues ordered for browsing: open issues first, then status,
+// most recently updated first, and finally by id for deterministic ties.
+func (r *Repository) List(ctx context.Context) ([]Issue, error) {
+	query := r.listQuery()
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("load issues from %q: %w", r.path, err)
+	}
+	defer rows.Close()
+
+	var result []Issue
+	for rows.Next() {
+		var (
+			issue         Issue
+			status        sql.NullString
+			parentID      sql.NullInt64
+			owner         sql.NullString
+			blockedReason sql.NullString
+			closedAt      sql.NullString
+		)
+		if err := rows.Scan(
+			&issue.ID,
+			&issue.Title,
+			&issue.Body,
+			&issue.State,
+			&status,
+			&parentID,
+			&owner,
+			&blockedReason,
+			&issue.CreatedAt,
+			&issue.UpdatedAt,
+			&closedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan issue row from %q: %w", r.path, err)
+		}
+		if status.Valid {
+			issue.Status = status.String
+		}
+		issue.ParentID = nullInt64Ptr(parentID)
+		issue.Owner = nullStringPtr(owner)
+		issue.BlockedReason = nullStringPtr(blockedReason)
+		issue.ClosedAt = nullStringPtr(closedAt)
+		result = append(result, issue)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load issues from %q: %w", r.path, err)
+	}
+	return result, nil
+}
+
+func (r *Repository) listQuery() string {
+	selects := []string{
+		"id",
+		"title",
+		"body",
+		"state",
+		r.selectColumnOrNull("status"),
+		r.selectColumnOrNull("parent_id"),
+		r.selectColumnOrNull("owner"),
+		r.selectColumnOrNull("blocked_reason"),
+		"created_at",
+		"updated_at",
+		r.selectColumnOrNull("closed_at"),
+	}
+
+	orderParts := []string{
+		"CASE state WHEN 'open' THEN 0 WHEN 'closed' THEN 1 ELSE 2 END",
+	}
+	if r.columns["status"] {
+		orderParts = append(orderParts, "CASE status WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'blocked' THEN 2 WHEN 'done' THEN 3 ELSE 4 END")
+	}
+	orderParts = append(orderParts, "updated_at DESC", "id ASC")
+
+	return fmt.Sprintf("SELECT %s FROM issues ORDER BY %s", strings.Join(selects, ", "), strings.Join(orderParts, ", "))
+}
+
+func (r *Repository) selectColumnOrNull(name string) string {
+	if r.columns[name] {
+		return name
+	}
+	return fmt.Sprintf("NULL AS %s", name)
+}
+
+func nullStringPtr(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	v := value.String
+	return &v
+}
+
+func nullInt64Ptr(value sql.NullInt64) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Int64
+	return &v
+}
+
+// OptionalColumns returns the optional issue columns present in this database.
+func (r *Repository) OptionalColumns() []string {
+	var present []string
+	for _, column := range []string{"status", "parent_id", "owner", "blocked_reason", "closed_at"} {
+		if r.columns[column] {
+			present = append(present, column)
+		}
+	}
+	sort.Strings(present)
+	return present
+}
