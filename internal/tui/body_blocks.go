@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 type issueBodyBlockKind int
 
@@ -8,6 +12,17 @@ const (
 	issueBodyTextBlock issueBodyBlockKind = iota
 	issueBodyHeadingBlock
 )
+
+const issueBodyHeadingMarker = "▾"
+
+var issueBodyHeadingStyles = []lipgloss.Style{
+	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("57")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("24")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("30")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("59")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("60")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("238")).Bold(true),
+}
 
 type issueBodyBlock struct {
 	Kind    issueBodyBlockKind
@@ -85,12 +100,42 @@ func renderIssueBodyLines(body string, width int) []string {
 	for _, block := range blocks {
 		switch block.Kind {
 		case issueBodyHeadingBlock:
-			lines = append(lines, wrapText(block.RawLine, width)...)
+			lines = append(lines, renderIssueBodyHeadingLines(block, width)...)
 		case issueBodyTextBlock:
 			lines = append(lines, wrapText(strings.Join(block.Lines, "\n"), width)...)
 		}
 	}
 	return lines
+}
+
+func renderIssueBodyHeadingLines(block issueBodyBlock, width int) []string {
+	width = max(1, width)
+	prefix := issueBodyHeadingMarker + " "
+	continuationPrefix := strings.Repeat(" ", lipgloss.Width(prefix))
+	text := strings.TrimSpace(block.Text)
+	contentWidth := max(1, width-lipgloss.Width(prefix))
+	wrapped := wrapText(text, contentWidth)
+	if len(wrapped) == 0 {
+		wrapped = []string{""}
+	}
+
+	style := issueBodyHeadingStyle(block.Level).Width(width)
+	lines := make([]string, 0, len(wrapped))
+	for i, line := range wrapped {
+		linePrefix := prefix
+		if i > 0 {
+			linePrefix = continuationPrefix
+		}
+		lines = append(lines, style.Render(truncate(linePrefix+line, width)))
+	}
+	return lines
+}
+
+func issueBodyHeadingStyle(level int) lipgloss.Style {
+	if len(issueBodyHeadingStyles) == 0 {
+		return lipgloss.NewStyle()
+	}
+	return issueBodyHeadingStyles[clamp(level, 1, len(issueBodyHeadingStyles))-1]
 }
 
 func parseATXHeading(line string) (level int, text string, ok bool) {

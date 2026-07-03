@@ -52,7 +52,7 @@ func TestParseIssueBodyBlocksHandlesMarkdownLikeHeadingEdges(t *testing.T) {
 	}
 }
 
-func TestRenderIssueBodyLinesMatchesLegacyWrappedBody(t *testing.T) {
+func TestRenderIssueBodyLinesStylesHeadingsAndKeepsBodyReadable(t *testing.T) {
 	body := strings.TrimSpace(`Intro words wrap normally
 # Heading
 Details line
@@ -62,8 +62,42 @@ Details line
 After`)
 
 	got := renderIssueBodyLines(body, 80)
-	want := wrapText(body, 80)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("renderIssueBodyLines() = %#v, want %#v", got, want)
+	stripped := make([]string, 0, len(got))
+	for _, line := range got {
+		stripped = append(stripped, strings.TrimRight(stripANSI(line), " "))
+	}
+
+	want := []string{
+		"Intro words wrap normally",
+		"▾ Heading",
+		"Details line",
+		"~~~md",
+		"## code heading stays text",
+		"~~~",
+		"After",
+	}
+	if !reflect.DeepEqual(stripped, want) {
+		t.Fatalf("renderIssueBodyLines() stripped = %#v, want %#v", stripped, want)
+	}
+	if rendered := stripANSI(got[1]); len([]rune(rendered)) != 80 || !strings.HasSuffix(rendered, " ") {
+		t.Fatalf("renderIssueBodyLines() heading line was not padded for background styling: %#v", got[1])
+	}
+}
+
+func TestRenderIssueBodyLinesWrapsHeadingWithStyledContinuation(t *testing.T) {
+	got := renderIssueBodyLines("## A very long section heading", 12)
+	stripped := make([]string, 0, len(got))
+	for _, line := range got {
+		stripped = append(stripped, strings.TrimRight(stripANSI(line), " "))
+	}
+
+	want := []string{"▾ A very", "  long", "  section", "  heading"}
+	if !reflect.DeepEqual(stripped, want) {
+		t.Fatalf("renderIssueBodyLines() stripped = %#v, want %#v", stripped, want)
+	}
+	for _, line := range got {
+		if rendered := stripANSI(line); len([]rune(rendered)) != 12 || !strings.HasSuffix(rendered, " ") {
+			t.Fatalf("renderIssueBodyLines() wrapped heading line was not padded for background styling: %#v", got)
+		}
 	}
 }
