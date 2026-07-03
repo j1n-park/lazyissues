@@ -42,6 +42,20 @@ func issueBodyHeadingSectionID(block issueBodyBlock, ordinal int) issueBodySecti
 	return issueBodySectionID(fmt.Sprintf("heading:%d:%d:%s", ordinal, block.Level, block.RawLine))
 }
 
+func issueBodySectionIDs(body string) []issueBodySectionID {
+	blocks := parseIssueBodyBlocks(body)
+	sectionIDs := make([]issueBodySectionID, 0)
+	headingOrdinal := 0
+	for _, block := range blocks {
+		if block.Kind != issueBodyHeadingBlock {
+			continue
+		}
+		headingOrdinal++
+		sectionIDs = append(sectionIDs, issueBodyHeadingSectionID(block, headingOrdinal))
+	}
+	return sectionIDs
+}
+
 func parseIssueBodyBlocks(body string) []issueBodyBlock {
 	if body == "" {
 		return nil

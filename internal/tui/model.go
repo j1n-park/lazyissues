@@ -192,6 +192,24 @@ func (m *Model) updateListNavigation(key string) {
 }
 
 func (m *Model) updateDetailNavigation(key string) {
+	switch key {
+	case "enter", " ":
+		m.toggleSectionAtDetailScroll()
+		return
+	case "a":
+		m.setAllSelectedSectionsCollapsed(false)
+		return
+	case "z":
+		m.setAllSelectedSectionsCollapsed(true)
+		return
+	case "[":
+		m.moveDetailSection(-1)
+		return
+	case "]":
+		m.moveDetailSection(1)
+		return
+	}
+
 	page := max(1, m.detailViewportHeight()-1)
 	switch key {
 	case "up", "k":
@@ -207,6 +225,79 @@ func (m *Model) updateDetailNavigation(key string) {
 	case "end":
 		m.detailScroll = m.maxDetailScroll()
 	}
+	m.clampDetailScroll()
+}
+
+func (m *Model) toggleSectionAtDetailScroll() {
+	issue, ok := m.selectedIssue()
+	if !ok {
+		return
+	}
+
+	sections := m.selectedIssueSectionLines()
+	if len(sections) == 0 {
+		return
+	}
+
+	section := issueBodySectionLineAtOrBefore(sections, m.detailScroll)
+	m.setSelectedSectionCollapsed(section.ID, !m.sectionCollapsed(issue.ID, section.ID))
+}
+
+func (m *Model) setAllSelectedSectionsCollapsed(collapsed bool) {
+	issue, ok := m.selectedIssue()
+	if !ok {
+		m.detailScroll = 0
+		return
+	}
+
+	sectionIDs := issueBodySectionIDs(issue.Body)
+	if len(sectionIDs) == 0 {
+		return
+	}
+
+	if collapsed && m.collapsedSections == nil {
+		m.collapsedSections = make(map[issueSectionKey]bool, len(sectionIDs))
+	}
+	for _, sectionID := range sectionIDs {
+		key := issueSectionKey{issueID: issue.ID, sectionID: sectionID}
+		if collapsed {
+			m.collapsedSections[key] = true
+		} else if m.collapsedSections != nil {
+			delete(m.collapsedSections, key)
+		}
+	}
+	if len(m.collapsedSections) == 0 {
+		m.collapsedSections = nil
+	}
+	m.clampDetailScroll()
+}
+
+func (m *Model) moveDetailSection(delta int) {
+	sections := m.selectedIssueSectionLines()
+	if len(sections) == 0 || delta == 0 {
+		return
+	}
+
+	current := m.detailScroll
+	selected := sections[0]
+	if delta > 0 {
+		selected = sections[len(sections)-1]
+		for _, section := range sections {
+			if section.StartLine > current {
+				selected = section
+				break
+			}
+		}
+	} else {
+		for i := len(sections) - 1; i >= 0; i-- {
+			if sections[i].StartLine < current {
+				selected = sections[i]
+				break
+			}
+		}
+	}
+
+	m.detailScroll = selected.StartLine
 	m.clampDetailScroll()
 }
 
@@ -370,6 +461,19 @@ func (m Model) detailLines(width int) []string {
 	if !ok {
 		return nil
 	}
+	lines := m.detailPrefixLines(issue, width)
+	body := strings.TrimSpace(issue.Body)
+	if body == "" {
+		lines = append(lines, subtleStyle.Render("(empty body)"))
+	} else {
+		lines = append(lines, renderIssueBodyLinesWithCollapse(body, width, func(sectionID issueBodySectionID) bool {
+			return m.sectionCollapsed(issue.ID, sectionID)
+		})...)
+	}
+	return lines
+}
+
+func (m Model) detailPrefixLines(issue issues.Issue, width int) []string {
 	lines := []string{
 		titleStyle.Render(truncate(fmt.Sprintf("#%d %s", issue.ID, issue.Title), width)),
 		fmt.Sprintf("%s %s", badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status))),
@@ -397,16 +501,75 @@ func (m Model) detailLines(width int) []string {
 	for _, line := range meta {
 		lines = append(lines, labelStyle.Render(truncate(line, width)))
 	}
-	lines = append(lines, "", titleStyle.Render("Body"), "")
+	return append(lines, "", titleStyle.Render("Body"), "")
+}
+
+type issueBodySectionLine struct {
+	ID        issueBodySectionID
+	StartLine int
+	EndLine   int
+}
+
+func (m Model) selectedIssueSectionLines() []issueBodySectionLine {
+	issue, ok := m.selectedIssue()
+	if !ok {
+		return nil
+	}
 	body := strings.TrimSpace(issue.Body)
 	if body == "" {
-		lines = append(lines, subtleStyle.Render("(empty body)"))
-	} else {
-		lines = append(lines, renderIssueBodyLinesWithCollapse(body, width, func(sectionID issueBodySectionID) bool {
-			return m.sectionCollapsed(issue.ID, sectionID)
-		})...)
+		return nil
 	}
-	return lines
+
+	width, _ := m.contentMetrics()
+	line := len(m.detailPrefixLines(issue, width))
+	sections := make([]issueBodySectionLine, 0)
+	headingOrdinal := 0
+	collapsedLevel := 0
+	for _, block := range parseIssueBodyBlocks(body) {
+		switch block.Kind {
+		case issueBodyHeadingBlock:
+			headingOrdinal++
+			if collapsedLevel > 0 {
+				if block.Level > collapsedLevel {
+					continue
+				}
+				collapsedLevel = 0
+			}
+
+			sectionID := issueBodyHeadingSectionID(block, headingOrdinal)
+			collapsed := m.sectionCollapsed(issue.ID, sectionID)
+			headingLines := renderIssueBodyHeadingLinesWithMarker(block, width, headingMarker(collapsed))
+			sections = append(sections, issueBodySectionLine{
+				ID:        sectionID,
+				StartLine: line,
+				EndLine:   line + max(1, len(headingLines)) - 1,
+			})
+			line += len(headingLines)
+			if collapsed {
+				collapsedLevel = block.Level
+			}
+		case issueBodyTextBlock:
+			if collapsedLevel > 0 {
+				continue
+			}
+			line += len(wrapText(strings.Join(block.Lines, "\n"), width))
+		}
+	}
+	return sections
+}
+
+func issueBodySectionLineAtOrBefore(sections []issueBodySectionLine, line int) issueBodySectionLine {
+	selected := sections[0]
+	for _, section := range sections {
+		if line < section.StartLine {
+			return selected
+		}
+		selected = section
+		if line <= section.EndLine {
+			return selected
+		}
+	}
+	return selected
 }
 
 func (m Model) footerLines(width int) []string {
@@ -414,11 +577,12 @@ func (m Model) footerLines(width int) []string {
 	if m.focus == focusDetail {
 		focus = "detail"
 	}
-	base := fmt.Sprintf("tab/h/l switch focus • j/k/↑/↓ navigate • pgup/pgdn/home/end • ? help • q quit • focus: %s", focus)
+	base := fmt.Sprintf("tab/h/l focus • j/k/↑/↓ navigate • pgup/pgdn/home/end • enter/space toggle • a/z all • ? help • q quit • focus: %s", focus)
 	lines := []string{helpStyle.Render(truncate(base, width))}
 	if m.showHelp {
 		lines = append(lines,
 			helpStyle.Render(truncate("List focus: move between issues. Detail focus: scroll selected issue body.", width)),
+			helpStyle.Render(truncate("Detail sections: enter/space toggle, [/] previous/next, a expand all, z collapse all.", width)),
 			helpStyle.Render(truncate("Read-only browser: no issue actions mutate the database.", width)),
 		)
 	}
