@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -41,10 +42,19 @@ var (
 	labelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true)
 )
 
+// LoadIssuesFunc reloads the issues currently displayed by the TUI.
+type LoadIssuesFunc func(context.Context) ([]issues.Issue, error)
+
+type refreshIssuesMsg struct {
+	issues []issues.Issue
+	err    error
+}
+
 // Model is the read-only lazyissues Bubble Tea model.
 type Model struct {
 	issues            []issues.Issue
 	dbPath            string
+	loadIssues        LoadIssuesFunc
 	selected          int
 	detailScroll      int
 	width             int
@@ -74,6 +84,22 @@ func NewErrorModel(err error, dbPath string) Model {
 	return Model{
 		dbPath: dbPath,
 		err:    err,
+	}
+}
+
+// WithIssueLoader returns a copy of the model configured to refresh issue data.
+func (m Model) WithIssueLoader(loadIssues LoadIssuesFunc) Model {
+	m.loadIssues = loadIssues
+	return m
+}
+
+func refreshIssuesCmd(loadIssues LoadIssuesFunc) tea.Cmd {
+	if loadIssues == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		loadedIssues, err := loadIssues(context.Background())
+		return refreshIssuesMsg{issues: loadedIssues, err: err}
 	}
 }
 
@@ -133,6 +159,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.clampDetailScroll()
 		return m, nil
+	case refreshIssuesMsg:
+		m.applyRefresh(msg.issues, msg.err)
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
@@ -140,6 +169,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.showHelp = !m.showHelp
 			return m, nil
+		case "r":
+			return m, refreshIssuesCmd(m.loadIssues)
 		case "tab":
 			m.toggleFocus()
 			return m, nil
@@ -163,6 +194,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *Model) applyRefresh(refreshed []issues.Issue, err error) {
+	if err != nil {
+		m.err = err
+		return
+	}
+
+	previousID := int64(0)
+	if previous, ok := m.selectedIssue(); ok {
+		previousID = previous.ID
+	}
+
+	m.err = nil
+	m.issues = refreshed
+	if len(refreshed) == 0 {
+		m.selected = 0
+		m.detailScroll = 0
+		return
+	}
+
+	if previousID != 0 {
+		for i, issue := range refreshed {
+			if issue.ID == previousID {
+				m.selected = i
+				m.clampDetailScroll()
+				return
+			}
+		}
+	}
+	if m.selected < 0 {
+		m.selected = 0
+	}
+	if m.selected >= len(refreshed) {
+		m.selected = len(refreshed) - 1
+	}
+	m.detailScroll = 0
+	m.clampDetailScroll()
 }
 
 func (m *Model) toggleFocus() {
@@ -577,11 +646,12 @@ func (m Model) footerLines(width int) []string {
 	if m.focus == focusDetail {
 		focus = "detail"
 	}
-	base := fmt.Sprintf("tab/h/l focus • j/k/↑/↓ navigate • pgup/pgdn/home/end • enter/space toggle • a/z all • ? help • q quit • focus: %s", focus)
+	base := fmt.Sprintf("tab/h/l focus • j/k/↑/↓ navigate • pgup/pgdn/home/end • r refresh • enter/space toggle • a/z all • ? help • q quit • focus: %s", focus)
 	lines := []string{helpStyle.Render(truncate(base, width))}
 	if m.showHelp {
 		lines = append(lines,
 			helpStyle.Render(truncate("List focus: move between issues. Detail focus: scroll selected issue body.", width)),
+			helpStyle.Render(truncate("Refresh: r reloads issues from the configured database.", width)),
 			helpStyle.Render(truncate("Detail sections: enter/space toggle, [/] previous/next, a expand all, z collapse all.", width)),
 			helpStyle.Render(truncate("Read-only browser: no issue actions mutate the database.", width)),
 		)

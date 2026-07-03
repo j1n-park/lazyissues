@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"strings"
@@ -272,6 +273,60 @@ func TestSectionKeysOnlyApplyWhenDetailPaneIsFocused(t *testing.T) {
 	model = updateModelWithKey(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	if model.sectionCollapsed(7, headingSectionIDAt(t, body, 1)) {
 		t.Fatal("enter should not toggle sections while list pane is focused")
+	}
+}
+
+func TestRefreshKeyReloadsIssuesAndPreservesSelectionByID(t *testing.T) {
+	model := NewModel([]issues.Issue{
+		{ID: 1, Title: "one", Body: "old", State: "open"},
+		{ID: 2, Title: "two", Body: "old", State: "open"},
+	}, "./issues.db").WithIssueLoader(func(ctx context.Context) ([]issues.Issue, error) {
+		return []issues.Issue{
+			{ID: 3, Title: "three", Body: "new", State: "open"},
+			{ID: 2, Title: "two updated", Body: "new", State: "open"},
+		}, nil
+	}).WithSize(90, 18)
+	model.selected = 1
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatal("r should return a refresh command")
+	}
+	model = updated.(Model)
+	updated, _ = model.Update(cmd())
+	model = updated.(Model)
+
+	if got, want := len(model.issues), 2; got != want {
+		t.Fatalf("issues length after refresh = %d, want %d", got, want)
+	}
+	if got, want := model.issues[model.selected].ID, int64(2); got != want {
+		t.Fatalf("selected issue ID after refresh = %d, want %d", got, want)
+	}
+	if got, want := model.issues[model.selected].Title, "two updated"; got != want {
+		t.Fatalf("selected issue title after refresh = %q, want %q", got, want)
+	}
+}
+
+func TestRefreshErrorIsDisplayedAndCanRecover(t *testing.T) {
+	refreshErr := errors.New("database is locked")
+	model := NewModel([]issues.Issue{{ID: 1, Title: "one", Body: "old", State: "open"}}, "./issues.db").WithSize(90, 18)
+
+	updated, _ := model.Update(refreshIssuesMsg{err: refreshErr})
+	model = updated.(Model)
+	if model.err == nil || model.err.Error() != refreshErr.Error() {
+		t.Fatalf("refresh error = %v, want %v", model.err, refreshErr)
+	}
+	if view := stripANSI(model.View()); !strings.Contains(view, "database is locked") {
+		t.Fatalf("error view missing refresh error:\n%s", view)
+	}
+
+	updated, _ = model.Update(refreshIssuesMsg{issues: []issues.Issue{{ID: 2, Title: "recovered", Body: "new", State: "open"}}})
+	model = updated.(Model)
+	if model.err != nil {
+		t.Fatalf("refresh success should clear error, got %v", model.err)
+	}
+	if got, want := model.issues[model.selected].Title, "recovered"; got != want {
+		t.Fatalf("selected issue title after recovery = %q, want %q", got, want)
 	}
 }
 

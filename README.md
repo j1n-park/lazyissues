@@ -102,6 +102,7 @@ Run it from the root of a project that uses the local pi issue queue, or pass `-
 - `h` / `Left`: focus the issue list.
 - `l` / `Right`: focus the detail pane.
 - `?`: show or hide the expanded help footer.
+- `r`: refresh/reload issues from the database without reopening the TUI.
 
 When the detail pane is focused and the selected issue body contains Markdown-like headings:
 
