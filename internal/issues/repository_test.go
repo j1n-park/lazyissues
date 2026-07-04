@@ -12,12 +12,12 @@ import (
 
 func TestListCurrentSchemaWithNullableOptionalFields(t *testing.T) {
 	path := createTestDB(t, currentSchemaSQL, []string{
-		`INSERT INTO issues (id, title, body, state, status, parent_id, owner, blocked_reason, created_at, updated_at, closed_at)
-		 VALUES (1, 'closed issue', 'done body', 'closed', 'done', NULL, NULL, NULL, '2026-01-01T00:00:00Z', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z')`,
-		`INSERT INTO issues (id, title, body, state, status, parent_id, owner, blocked_reason, created_at, updated_at, closed_at)
-		 VALUES (2, 'blocked issue', 'blocked body', 'open', 'blocked', 1, 'alice', 'waiting', '2026-01-01T00:00:00Z', '2026-01-04T00:00:00Z', NULL)`,
-		`INSERT INTO issues (id, title, body, state, status, parent_id, owner, blocked_reason, created_at, updated_at, closed_at)
-		 VALUES (3, 'active issue', 'active body', 'open', 'in_progress', NULL, NULL, NULL, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z', NULL)`,
+		`INSERT INTO issues (id, title, body, state, status, thinking, parent_id, owner, blocked_reason, created_at, updated_at, closed_at)
+		 VALUES (1, 'closed issue', 'done body', 'closed', 'done', 'low', NULL, NULL, NULL, '2026-01-01T00:00:00Z', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z')`,
+		`INSERT INTO issues (id, title, body, state, status, thinking, parent_id, owner, blocked_reason, created_at, updated_at, closed_at)
+		 VALUES (2, 'blocked issue', 'blocked body', 'open', 'blocked', 'high', 1, 'alice', 'waiting', '2026-01-01T00:00:00Z', '2026-01-04T00:00:00Z', NULL)`,
+		`INSERT INTO issues (id, title, body, state, status, thinking, parent_id, owner, blocked_reason, created_at, updated_at, closed_at)
+		 VALUES (3, 'active issue', 'active body', 'open', 'in_progress', 'medium', NULL, NULL, NULL, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z', NULL)`,
 	})
 
 	repo, err := Open(path)
@@ -43,6 +43,9 @@ func TestListCurrentSchemaWithNullableOptionalFields(t *testing.T) {
 	if active.Status != "in_progress" {
 		t.Fatalf("active status = %q, want in_progress", active.Status)
 	}
+	if active.Thinking != "medium" {
+		t.Fatalf("active thinking = %q, want medium", active.Thinking)
+	}
 	if active.ParentID != nil || active.Owner != nil || active.BlockedReason != nil || active.ClosedAt != nil {
 		t.Fatalf("active nullable fields = %#v, want nil pointers", active)
 	}
@@ -56,6 +59,9 @@ func TestListCurrentSchemaWithNullableOptionalFields(t *testing.T) {
 	}
 	if blocked.BlockedReason == nil || *blocked.BlockedReason != "waiting" {
 		t.Fatalf("blocked reason = %v, want waiting", blocked.BlockedReason)
+	}
+	if blocked.Thinking != "high" {
+		t.Fatalf("blocked thinking = %q, want high", blocked.Thinking)
 	}
 	if blocked.ClosedAt != nil {
 		t.Fatalf("blocked closed_at = %v, want nil", blocked.ClosedAt)
@@ -91,11 +97,68 @@ func TestListOlderSchemaMissingOptionalColumns(t *testing.T) {
 	if got := issues[0].Status; got != "" {
 		t.Fatalf("status for missing status column = %q, want empty string", got)
 	}
+	if got := issues[0].Thinking; got != "" {
+		t.Fatalf("thinking for missing thinking source = %q, want empty string", got)
+	}
 	if issues[0].ParentID != nil || issues[0].Owner != nil || issues[0].BlockedReason != nil || issues[0].ClosedAt != nil {
 		t.Fatalf("optional fields = %#v, want nil pointers", issues[0])
 	}
 	if got := repo.OptionalColumns(); len(got) != 0 {
 		t.Fatalf("OptionalColumns() = %v, want none", got)
+	}
+}
+
+func TestListUsesLatestDelegationThinkingWhenIssueColumnIsMissing(t *testing.T) {
+	path := createTestDB(t, olderSchemaWithDelegationsSQL, []string{
+		`INSERT INTO issues (id, title, body, state, created_at, updated_at)
+		 VALUES (1, 'delegated issue', 'body', 'open', '2026-01-01T00:00:00Z', '2026-01-03T00:00:00Z')`,
+		`INSERT INTO issues (id, title, body, state, created_at, updated_at)
+		 VALUES (2, 'plain issue', 'body', 'open', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z')`,
+		`INSERT INTO issue_delegations (id, issue_id, scope, thinking, status, started_at, updated_at, output, stderr)
+		 VALUES (1, 1, 'first scope', 'low', 'succeeded', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '', '')`,
+		`INSERT INTO issue_delegations (id, issue_id, scope, thinking, status, started_at, updated_at, output, stderr)
+		 VALUES (2, 1, 'latest scope', 'high', 'succeeded', '2026-01-01T00:00:00Z', '2026-01-04T00:00:00Z', '', '')`,
+	})
+
+	repo, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer repo.Close()
+
+	issues, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got, want := issues[0].Thinking, "high"; got != want {
+		t.Fatalf("delegated issue thinking = %q, want %q", got, want)
+	}
+	if got := issues[1].Thinking; got != "" {
+		t.Fatalf("plain issue thinking = %q, want empty string", got)
+	}
+	if got := repo.OptionalColumns(); !containsString(got, "issue_delegations.thinking") {
+		t.Fatalf("OptionalColumns() = %v, want issue_delegations.thinking", got)
+	}
+}
+
+func TestListSupportsThinkingLevelColumnAlias(t *testing.T) {
+	path := createTestDB(t, thinkingLevelSchemaSQL, []string{
+		`INSERT INTO issues (id, title, body, state, thinking_level, created_at, updated_at)
+		 VALUES (1, 'aliased issue', 'body', 'open', 'low', '2026-01-01T00:00:00Z', '2026-01-03T00:00:00Z')`,
+	})
+
+	repo, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer repo.Close()
+
+	issues, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got, want := issues[0].Thinking, "low"; got != want {
+		t.Fatalf("issue thinking = %q, want %q", got, want)
 	}
 }
 
@@ -197,6 +260,15 @@ func equalInt64s(a, b []int64) bool {
 	return true
 }
 
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 const currentSchemaSQL = `
 CREATE TABLE issues (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -204,6 +276,7 @@ CREATE TABLE issues (
 	body TEXT NOT NULL DEFAULT '',
 	state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),
 	status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'in_progress', 'blocked', 'done')),
+	thinking TEXT CHECK (thinking IN ('low', 'medium', 'high')),
 	parent_id INTEGER,
 	owner TEXT,
 	blocked_reason TEXT,
@@ -218,6 +291,32 @@ CREATE TABLE issues (
 	title TEXT NOT NULL,
 	body TEXT NOT NULL DEFAULT '',
 	state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);`
+
+const olderSchemaWithDelegationsSQL = olderSchemaSQL + `
+CREATE TABLE issue_delegations (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	role TEXT NOT NULL DEFAULT 'worker',
+	scope TEXT NOT NULL,
+	write_allowed INTEGER NOT NULL DEFAULT 0,
+	thinking TEXT CHECK (thinking IN ('low', 'medium', 'high')),
+	status TEXT NOT NULL CHECK (status IN ('preparing', 'running', 'succeeded', 'failed', 'canceled')),
+	started_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	output TEXT NOT NULL DEFAULT '',
+	stderr TEXT NOT NULL DEFAULT ''
+);`
+
+const thinkingLevelSchemaSQL = `
+CREATE TABLE issues (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	title TEXT NOT NULL,
+	body TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),
+	thinking_level TEXT CHECK (thinking_level IN ('low', 'medium', 'high')),
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );`

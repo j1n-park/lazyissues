@@ -490,7 +490,7 @@ func (m Model) renderList(width, height int) string {
 			cursor = "›"
 		}
 		first := fmt.Sprintf("%s #%d %s", cursor, issue.ID, truncate(issue.Title, max(8, innerWidth-lipgloss.Width(cursor)-lipgloss.Width(fmt.Sprintf(" #%d ", issue.ID)))))
-		second := fmt.Sprintf("  %s %s · %s", badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), readableTime(issue.UpdatedAt))
+		second := fmt.Sprintf("  %s %s %s · %s", badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking)), readableTime(issue.UpdatedAt))
 		second = truncate(second, innerWidth)
 		if selected {
 			first = selectedStyle.Render(padRight(truncate(first, innerWidth), innerWidth))
@@ -557,27 +557,28 @@ func (m Model) detailLines(width int) []string {
 func (m Model) detailPrefixLines(issue issues.Issue, width int) []string {
 	lines := []string{
 		titleStyle.Render(truncate(fmt.Sprintf("#%d %s", issue.ID, issue.Title), width)),
-		fmt.Sprintf("%s %s", badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status))),
+		fmt.Sprintf("%s %s %s", badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking))),
 		"",
 	}
 	meta := []string{
-		fmt.Sprintf("State:   %s", blankDefault(issue.State, "unknown")),
-		fmt.Sprintf("Status:  %s", blankDefault(issue.Status, "no-status")),
-		fmt.Sprintf("Created: %s", readableTime(issue.CreatedAt)),
-		fmt.Sprintf("Updated: %s", readableTime(issue.UpdatedAt)),
+		fmt.Sprintf("State:    %s", blankDefault(issue.State, "unknown")),
+		fmt.Sprintf("Status:   %s", blankDefault(issue.Status, "no-status")),
+		fmt.Sprintf("Thinking: %s", blankDefault(issue.Thinking, "no-thinking")),
+		fmt.Sprintf("Created:  %s", readableTime(issue.CreatedAt)),
+		fmt.Sprintf("Updated:  %s", readableTime(issue.UpdatedAt)),
 	}
 	if issue.ParentID != nil {
-		meta = append(meta, fmt.Sprintf("Parent:  #%d", *issue.ParentID))
+		meta = append(meta, fmt.Sprintf("Parent:   #%d", *issue.ParentID))
 	}
 	if issue.Owner != nil && strings.TrimSpace(*issue.Owner) != "" {
-		meta = append(meta, fmt.Sprintf("Owner:   %s", *issue.Owner))
+		meta = append(meta, fmt.Sprintf("Owner:    %s", *issue.Owner))
 	}
 	if issue.BlockedReason != nil && strings.TrimSpace(*issue.BlockedReason) != "" {
 		meta = append(meta, "Blocked:")
 		meta = append(meta, indentLines(wrapText(*issue.BlockedReason, max(8, width-2)), "  ")...)
 	}
 	if issue.ClosedAt != nil && strings.TrimSpace(*issue.ClosedAt) != "" {
-		meta = append(meta, fmt.Sprintf("Closed:  %s", readableTime(*issue.ClosedAt)))
+		meta = append(meta, fmt.Sprintf("Closed:   %s", readableTime(*issue.ClosedAt)))
 	}
 	for _, line := range meta {
 		lines = append(lines, labelStyle.Render(truncate(line, width)))
@@ -738,6 +739,19 @@ func statusColor(status string) string {
 		return "196"
 	case "done":
 		return "35"
+	default:
+		return "244"
+	}
+}
+
+func thinkingColor(thinking string) string {
+	switch strings.ToLower(strings.TrimSpace(thinking)) {
+	case "low":
+		return "245"
+	case "medium":
+		return "99"
+	case "high":
+		return "201"
 	default:
 		return "244"
 	}

@@ -16,15 +16,16 @@ import (
 
 // Issue is a local pi issue row loaded from .pi/issues.db.
 //
-// Newer pi schemas include Status, ParentID, Owner, BlockedReason, and ClosedAt.
+// Newer pi schemas include Status, Thinking, ParentID, Owner, BlockedReason, and ClosedAt.
 // Older databases may not have those columns; missing or NULL values are exposed as
-// the zero value for Status and nil pointers for nullable fields.
+// the zero value for Status/Thinking and nil pointers for nullable fields.
 type Issue struct {
 	ID            int64
 	Title         string
 	Body          string
 	State         string
 	Status        string
+	Thinking      string
 	ParentID      *int64
 	Owner         *string
 	BlockedReason *string
@@ -35,9 +36,10 @@ type Issue struct {
 
 // Repository loads issues from a read-only SQLite database.
 type Repository struct {
-	path    string
-	db      *sql.DB
-	columns map[string]bool
+	path              string
+	db                *sql.DB
+	columns           map[string]bool
+	delegationColumns map[string]bool
 }
 
 // Open opens path as a read-only SQLite issue database and validates the issues table.
@@ -99,7 +101,7 @@ func (r *Repository) validate() error {
 		return fmt.Errorf("inspect issues database %q: %w", r.path, err)
 	}
 
-	columns, err := loadColumns(r.db)
+	columns, err := loadColumns(r.db, "issues")
 	if err != nil {
 		return fmt.Errorf("inspect issues table in %q: %w", r.path, err)
 	}
@@ -114,12 +116,30 @@ func (r *Repository) validate() error {
 		return fmt.Errorf("issues table in %q is missing required column(s): %s", r.path, strings.Join(missing, ", "))
 	}
 
+	delegationColumns, err := loadOptionalTableColumns(r.db, "issue_delegations")
+	if err != nil {
+		return fmt.Errorf("inspect issue_delegations table in %q: %w", r.path, err)
+	}
+
 	r.columns = columns
+	r.delegationColumns = delegationColumns
 	return nil
 }
 
-func loadColumns(db *sql.DB) (map[string]bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(issues)`)
+func loadOptionalTableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	var name string
+	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return loadColumns(db, table)
+}
+
+func loadColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +189,7 @@ func (r *Repository) List(ctx context.Context) ([]Issue, error) {
 		var (
 			issue         Issue
 			status        sql.NullString
+			thinking      sql.NullString
 			parentID      sql.NullInt64
 			owner         sql.NullString
 			blockedReason sql.NullString
@@ -180,6 +201,7 @@ func (r *Repository) List(ctx context.Context) ([]Issue, error) {
 			&issue.Body,
 			&issue.State,
 			&status,
+			&thinking,
 			&parentID,
 			&owner,
 			&blockedReason,
@@ -191,6 +213,9 @@ func (r *Repository) List(ctx context.Context) ([]Issue, error) {
 		}
 		if status.Valid {
 			issue.Status = status.String
+		}
+		if thinking.Valid {
+			issue.Thinking = thinking.String
 		}
 		issue.ParentID = nullInt64Ptr(parentID)
 		issue.Owner = nullStringPtr(owner)
@@ -206,35 +231,67 @@ func (r *Repository) List(ctx context.Context) ([]Issue, error) {
 
 func (r *Repository) listQuery() string {
 	selects := []string{
-		"id",
-		"title",
-		"body",
-		"state",
-		r.selectColumnOrNull("status"),
-		r.selectColumnOrNull("parent_id"),
-		r.selectColumnOrNull("owner"),
-		r.selectColumnOrNull("blocked_reason"),
-		"created_at",
-		"updated_at",
-		r.selectColumnOrNull("closed_at"),
+		"issues.id",
+		"issues.title",
+		"issues.body",
+		"issues.state",
+		r.selectIssueColumnOrNull("status"),
+		r.selectThinkingColumn(),
+		r.selectIssueColumnOrNull("parent_id"),
+		r.selectIssueColumnOrNull("owner"),
+		r.selectIssueColumnOrNull("blocked_reason"),
+		"issues.created_at",
+		"issues.updated_at",
+		r.selectIssueColumnOrNull("closed_at"),
 	}
 
 	orderParts := []string{
-		"CASE state WHEN 'open' THEN 0 WHEN 'closed' THEN 1 ELSE 2 END",
+		"CASE issues.state WHEN 'open' THEN 0 WHEN 'closed' THEN 1 ELSE 2 END",
 	}
 	if r.columns["status"] {
-		orderParts = append(orderParts, "CASE status WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'blocked' THEN 2 WHEN 'done' THEN 3 ELSE 4 END")
+		orderParts = append(orderParts, "CASE issues.status WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'blocked' THEN 2 WHEN 'done' THEN 3 ELSE 4 END")
 	}
-	orderParts = append(orderParts, "updated_at DESC", "id ASC")
+	orderParts = append(orderParts, "issues.updated_at DESC", "issues.id ASC")
 
 	return fmt.Sprintf("SELECT %s FROM issues ORDER BY %s", strings.Join(selects, ", "), strings.Join(orderParts, ", "))
 }
 
-func (r *Repository) selectColumnOrNull(name string) string {
+func (r *Repository) selectIssueColumnOrNull(name string) string {
 	if r.columns[name] {
-		return name
+		return "issues." + name
 	}
 	return fmt.Sprintf("NULL AS %s", name)
+}
+
+func (r *Repository) selectThinkingColumn() string {
+	var candidates []string
+	if r.columns["thinking"] {
+		candidates = append(candidates, "NULLIF(TRIM(issues.thinking), '')")
+	}
+	if r.columns["thinking_level"] {
+		candidates = append(candidates, "NULLIF(TRIM(issues.thinking_level), '')")
+	}
+	if r.delegationColumns["issue_id"] && r.delegationColumns["thinking"] {
+		orderParts := make([]string, 0, 2)
+		if r.delegationColumns["updated_at"] {
+			orderParts = append(orderParts, "issue_delegations.updated_at DESC")
+		}
+		if r.delegationColumns["id"] {
+			orderParts = append(orderParts, "issue_delegations.id DESC")
+		}
+		orderClause := ""
+		if len(orderParts) > 0 {
+			orderClause = " ORDER BY " + strings.Join(orderParts, ", ")
+		}
+		candidates = append(candidates, fmt.Sprintf("(SELECT NULLIF(TRIM(issue_delegations.thinking), '') FROM issue_delegations WHERE issue_delegations.issue_id = issues.id AND issue_delegations.thinking IS NOT NULL AND TRIM(issue_delegations.thinking) != ''%s LIMIT 1)", orderClause))
+	}
+	if len(candidates) == 0 {
+		return "NULL AS thinking"
+	}
+	if len(candidates) == 1 {
+		return candidates[0] + " AS thinking"
+	}
+	return fmt.Sprintf("COALESCE(%s) AS thinking", strings.Join(candidates, ", "))
 }
 
 func nullStringPtr(value sql.NullString) *string {
@@ -256,10 +313,13 @@ func nullInt64Ptr(value sql.NullInt64) *int64 {
 // OptionalColumns returns the optional issue columns present in this database.
 func (r *Repository) OptionalColumns() []string {
 	var present []string
-	for _, column := range []string{"status", "parent_id", "owner", "blocked_reason", "closed_at"} {
+	for _, column := range []string{"status", "thinking", "thinking_level", "parent_id", "owner", "blocked_reason", "closed_at"} {
 		if r.columns[column] {
 			present = append(present, column)
 		}
+	}
+	if r.delegationColumns["thinking"] {
+		present = append(present, "issue_delegations.thinking")
 	}
 	sort.Strings(present)
 	return present
