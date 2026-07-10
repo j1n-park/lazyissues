@@ -490,7 +490,11 @@ func (m Model) renderList(width, height int) string {
 			cursor = "›"
 		}
 		first := fmt.Sprintf("%s #%d %s", cursor, issue.ID, truncate(issue.Title, max(8, innerWidth-lipgloss.Width(cursor)-lipgloss.Width(fmt.Sprintf(" #%d ", issue.ID)))))
-		second := fmt.Sprintf("  %s %s %s · %s", badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking)), readableTime(issue.UpdatedAt))
+		metadataBadges := []string{badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking))}
+		if strings.TrimSpace(issue.Model) != "" {
+			metadataBadges = append(metadataBadges, badge(issue.Model, "60"))
+		}
+		second := fmt.Sprintf("  %s · %s", strings.Join(metadataBadges, " "), readableTime(issue.UpdatedAt))
 		second = truncate(second, innerWidth)
 		if selected {
 			first = selectedStyle.Render(padRight(truncate(first, innerWidth), innerWidth))
@@ -555,9 +559,13 @@ func (m Model) detailLines(width int) []string {
 }
 
 func (m Model) detailPrefixLines(issue issues.Issue, width int) []string {
+	metadataBadges := []string{badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking))}
+	if strings.TrimSpace(issue.Model) != "" {
+		metadataBadges = append(metadataBadges, badge(issue.Model, "60"))
+	}
 	lines := []string{
 		titleStyle.Render(truncate(fmt.Sprintf("#%d %s", issue.ID, issue.Title), width)),
-		fmt.Sprintf("%s %s %s", badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking))),
+		strings.Join(metadataBadges, " "),
 		"",
 	}
 	meta := []string{
@@ -566,6 +574,9 @@ func (m Model) detailPrefixLines(issue issues.Issue, width int) []string {
 		fmt.Sprintf("Thinking: %s", blankDefault(issue.Thinking, "no-thinking")),
 		fmt.Sprintf("Created:  %s", readableTime(issue.CreatedAt)),
 		fmt.Sprintf("Updated:  %s", readableTime(issue.UpdatedAt)),
+	}
+	if strings.TrimSpace(issue.Model) != "" {
+		meta = append(meta, fmt.Sprintf("Model:    %s", issue.Model))
 	}
 	if issue.ParentID != nil {
 		meta = append(meta, fmt.Sprintf("Parent:   #%d", *issue.ParentID))

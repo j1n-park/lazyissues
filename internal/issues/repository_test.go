@@ -141,6 +141,35 @@ func TestListUsesLatestDelegationThinkingWhenIssueColumnIsMissing(t *testing.T) 
 	}
 }
 
+func TestListUsesLatestNonEmptyDelegationModel(t *testing.T) {
+	path := createTestDB(t, delegationModelSchemaSQL, []string{
+		`INSERT INTO issues (id, title, body, state, created_at, updated_at) VALUES (1, 'delegated', '', 'open', '2026-01-01', '2026-01-02')`,
+		`INSERT INTO issues (id, title, body, state, created_at, updated_at) VALUES (2, 'plain', '', 'open', '2026-01-01', '2026-01-01')`,
+		`INSERT INTO issue_delegations (id, issue_id, model, updated_at) VALUES (1, 1, 'older/model', '2026-01-02')`,
+		`INSERT INTO issue_delegations (id, issue_id, model, updated_at) VALUES (2, 1, 'newer/model', '2026-01-03')`,
+		`INSERT INTO issue_delegations (id, issue_id, model, updated_at) VALUES (3, 1, '  ', '2026-01-04')`,
+	})
+
+	repo, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer repo.Close()
+	loaded, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got, want := loaded[0].Model, "newer/model"; got != want {
+		t.Fatalf("delegated issue model = %q, want %q", got, want)
+	}
+	if got := loaded[1].Model; got != "" {
+		t.Fatalf("plain issue model = %q, want empty", got)
+	}
+	if got := repo.OptionalColumns(); !containsString(got, "issue_delegations.model") {
+		t.Fatalf("OptionalColumns() = %v, want issue_delegations.model", got)
+	}
+}
+
 func TestListSupportsThinkingLevelColumnAlias(t *testing.T) {
 	path := createTestDB(t, thinkingLevelSchemaSQL, []string{
 		`INSERT INTO issues (id, title, body, state, thinking_level, created_at, updated_at)
@@ -308,6 +337,14 @@ CREATE TABLE issue_delegations (
 	updated_at TEXT NOT NULL,
 	output TEXT NOT NULL DEFAULT '',
 	stderr TEXT NOT NULL DEFAULT ''
+);`
+
+const delegationModelSchemaSQL = olderSchemaSQL + `
+CREATE TABLE issue_delegations (
+	id INTEGER PRIMARY KEY,
+	issue_id INTEGER NOT NULL,
+	model TEXT,
+	updated_at TEXT NOT NULL
 );`
 
 const thinkingLevelSchemaSQL = `

@@ -91,7 +91,7 @@ By default, `lazyissues` opens:
 ./.pi/issues.db
 ```
 
-Run it from the root of a project that uses the local pi issue queue, or pass `--db` with an explicit path. The app validates that the file exists, is a SQLite database, and contains an `issues` table with the required columns (`id`, `title`, `body`, `state`, `created_at`, `updated_at`). Optional columns such as `status`, `thinking`/`thinking_level`, `parent_id`, `owner`, `blocked_reason`, and `closed_at` are displayed when present. If the issue schema stores subagent thinking depth in `issue_delegations.thinking`, `lazyissues` shows the latest thinking level for each issue.
+Run it from the root of a project that uses the local pi issue queue, or pass `--db` with an explicit path. The app validates that the file exists, is a SQLite database, and contains an `issues` table with the required columns (`id`, `title`, `body`, `state`, `created_at`, `updated_at`). Optional columns such as `status`, `thinking`/`thinking_level`, `parent_id`, `owner`, `blocked_reason`, and `closed_at` are displayed when present. If the issue schema stores subagent thinking depth in `issue_delegations.thinking`, `lazyissues` shows the latest thinking level for each issue. When `issue_delegations.model` is available, the latest non-empty delegation model is also shown.
 
 ## Keybindings
 
@@ -132,6 +132,7 @@ The UI renders:
 - Open and closed issue states.
 - Common statuses including `todo`, `in_progress`, `blocked`, and `done`.
 - Thinking levels including `low`, `medium`, and `high` when available.
+- The latest non-empty delegation model when available.
 - Optional parent, owner, blocked reason, and closed timestamp metadata when available.
 
 ## Development and validation

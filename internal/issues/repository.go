@@ -16,9 +16,9 @@ import (
 
 // Issue is a local pi issue row loaded from .pi/issues.db.
 //
-// Newer pi schemas include Status, Thinking, ParentID, Owner, BlockedReason, and ClosedAt.
-// Older databases may not have those columns; missing or NULL values are exposed as
-// the zero value for Status/Thinking and nil pointers for nullable fields.
+// Newer pi schemas include Status, Thinking, ParentID, Owner, BlockedReason, and ClosedAt,
+// and delegation records may include Model. Older databases may not have those columns;
+// missing or NULL values are exposed as zero values or nil pointers.
 type Issue struct {
 	ID            int64
 	Title         string
@@ -26,6 +26,7 @@ type Issue struct {
 	State         string
 	Status        string
 	Thinking      string
+	Model         string
 	ParentID      *int64
 	Owner         *string
 	BlockedReason *string
@@ -190,6 +191,7 @@ func (r *Repository) List(ctx context.Context) ([]Issue, error) {
 			issue         Issue
 			status        sql.NullString
 			thinking      sql.NullString
+			model         sql.NullString
 			parentID      sql.NullInt64
 			owner         sql.NullString
 			blockedReason sql.NullString
@@ -202,6 +204,7 @@ func (r *Repository) List(ctx context.Context) ([]Issue, error) {
 			&issue.State,
 			&status,
 			&thinking,
+			&model,
 			&parentID,
 			&owner,
 			&blockedReason,
@@ -216,6 +219,9 @@ func (r *Repository) List(ctx context.Context) ([]Issue, error) {
 		}
 		if thinking.Valid {
 			issue.Thinking = thinking.String
+		}
+		if model.Valid {
+			issue.Model = model.String
 		}
 		issue.ParentID = nullInt64Ptr(parentID)
 		issue.Owner = nullStringPtr(owner)
@@ -237,6 +243,7 @@ func (r *Repository) listQuery() string {
 		"issues.state",
 		r.selectIssueColumnOrNull("status"),
 		r.selectThinkingColumn(),
+		r.selectDelegationModelColumn(),
 		r.selectIssueColumnOrNull("parent_id"),
 		r.selectIssueColumnOrNull("owner"),
 		r.selectIssueColumnOrNull("blocked_reason"),
@@ -294,6 +301,24 @@ func (r *Repository) selectThinkingColumn() string {
 	return fmt.Sprintf("COALESCE(%s) AS thinking", strings.Join(candidates, ", "))
 }
 
+func (r *Repository) selectDelegationModelColumn() string {
+	if !r.delegationColumns["issue_id"] || !r.delegationColumns["model"] {
+		return "NULL AS model"
+	}
+	orderParts := make([]string, 0, 2)
+	if r.delegationColumns["updated_at"] {
+		orderParts = append(orderParts, "issue_delegations.updated_at DESC")
+	}
+	if r.delegationColumns["id"] {
+		orderParts = append(orderParts, "issue_delegations.id DESC")
+	}
+	orderClause := ""
+	if len(orderParts) > 0 {
+		orderClause = " ORDER BY " + strings.Join(orderParts, ", ")
+	}
+	return fmt.Sprintf("(SELECT NULLIF(TRIM(issue_delegations.model), '') FROM issue_delegations WHERE issue_delegations.issue_id = issues.id AND issue_delegations.model IS NOT NULL AND TRIM(issue_delegations.model) != ''%s LIMIT 1) AS model", orderClause)
+}
+
 func nullStringPtr(value sql.NullString) *string {
 	if !value.Valid {
 		return nil
@@ -320,6 +345,9 @@ func (r *Repository) OptionalColumns() []string {
 	}
 	if r.delegationColumns["thinking"] {
 		present = append(present, "issue_delegations.thinking")
+	}
+	if r.delegationColumns["model"] {
+		present = append(present, "issue_delegations.model")
 	}
 	sort.Strings(present)
 	return present

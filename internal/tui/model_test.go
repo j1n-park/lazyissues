@@ -45,6 +45,23 @@ func TestViewRendersReadableStatusesAndHelp(t *testing.T) {
 	}
 }
 
+func TestViewRendersDelegationModelOnlyWhenPresent(t *testing.T) {
+	withModel := issues.Issue{ID: 1, Title: "delegated", State: "open", Model: "openai/gpt-5", CreatedAt: "2026-01-01", UpdatedAt: "2026-01-02"}
+	view := stripANSI(NewModel([]issues.Issue{withModel}, "test.db").WithSize(120, 20).View())
+	for _, want := range []string{"OPENAI/GPT-5", "Model:    openai/gpt-5"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("View() missing %q:\n%s", want, view)
+		}
+	}
+
+	withoutModel := withModel
+	withoutModel.Model = ""
+	view = stripANSI(NewModel([]issues.Issue{withoutModel}, "test.db").WithSize(120, 20).View())
+	if strings.Contains(view, "Model:") {
+		t.Fatalf("View() rendered empty model metadata:\n%s", view)
+	}
+}
+
 func TestViewRendersEmptyAndErrorStates(t *testing.T) {
 	empty := stripANSI(NewModel(nil, "./empty.db").WithSize(90, 18).View())
 	for _, want := range []string{"No issues found.", "No issue selected", "database loaded successfully"} {
