@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"lazyissues/internal/issues"
 )
@@ -114,6 +115,52 @@ func TestListWindowStartKeepsSelectionVisible(t *testing.T) {
 				t.Fatalf("listWindowStart(%d, %d, %d) = %d, want %d", tt.selected, tt.total, tt.visible, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLongTitlesWrapInListAndDetailWithoutEllipsis(t *testing.T) {
+	title := "Implement complete title rendering without ellipsis across both panes"
+	issue := issues.Issue{ID: 2, Title: title, State: "open", Status: "todo", Thinking: "medium"}
+	model := NewModel([]issues.Issue{
+		{ID: 1, Title: "before", State: "open"},
+		issue,
+		{ID: 3, Title: "after", State: "open"},
+	}, "./issues.db").WithSize(70, 10)
+	model.selected = 1
+
+	bodyWidth := max(20, model.width)
+	paneHeight := max(6, model.height-len(model.footerLines(bodyWidth)))
+	listWidth, detailWidth := model.paneWidths(bodyWidth)
+	listInnerWidth := listWidth - paneStyle.GetHorizontalFrameSize()
+	list := stripANSI(model.renderList(listWidth, paneHeight))
+	for _, line := range wrapText("› #2 "+title, listInnerWidth) {
+		if !strings.Contains(list, line) {
+			t.Fatalf("list omitted wrapped title line %q:\n%s", line, list)
+		}
+		if lipgloss.Width(line) > listInnerWidth {
+			t.Fatalf("list title line width = %d, want <= %d", lipgloss.Width(line), listInnerWidth)
+		}
+	}
+	if strings.Index(list, "OPEN") < strings.Index(list, "panes") {
+		t.Fatalf("list metadata appeared before the complete title:\n%s", list)
+	}
+
+	detailInnerWidth := detailWidth - paneStyle.GetHorizontalFrameSize()
+	detail := stripANSI(strings.Join(model.detailPrefixLines(issue, detailInnerWidth), "\n"))
+	for _, line := range wrapText("#2 "+title, detailInnerWidth) {
+		if !strings.Contains(detail, line) {
+			t.Fatalf("detail omitted wrapped title line %q:\n%s", line, detail)
+		}
+		if lipgloss.Width(line) > detailInnerWidth {
+			t.Fatalf("detail title line width = %d, want <= %d", lipgloss.Width(line), detailInnerWidth)
+		}
+	}
+}
+
+func TestListWindowKeepsSelectedVariableHeightRowVisible(t *testing.T) {
+	start, end := listWindow(1, []int{2, 5, 2}, 7)
+	if start != 1 || end != 2 {
+		t.Fatalf("listWindow() = (%d, %d), want selected row only", start, end)
 	}
 }
 

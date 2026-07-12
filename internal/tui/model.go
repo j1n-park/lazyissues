@@ -476,34 +476,16 @@ func (m Model) renderList(width, height int) string {
 		return style.Width(innerWidth).Height(innerHeight).Render(fitLines(lines, innerHeight))
 	}
 
-	visible := max(1, (innerHeight-2)/2)
-	start := listWindowStart(m.selected, len(m.issues), visible)
-	end := min(len(m.issues), start+visible)
+	rowHeights := make([]int, len(m.issues))
+	for i, issue := range m.issues {
+		rowHeights[i] = m.listIssueHeight(issue, innerWidth)
+	}
+	start, end := listWindow(m.selected, rowHeights, innerHeight-1)
 	if start > 0 {
 		lines = append(lines, subtleStyle.Render(fmt.Sprintf("↑ %d more", start)))
 	}
 	for i := start; i < end; i++ {
-		issue := m.issues[i]
-		selected := i == m.selected
-		cursor := " "
-		if selected {
-			cursor = "›"
-		}
-		first := fmt.Sprintf("%s #%d %s", cursor, issue.ID, truncate(issue.Title, max(8, innerWidth-lipgloss.Width(cursor)-lipgloss.Width(fmt.Sprintf(" #%d ", issue.ID)))))
-		metadataBadges := []string{badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking))}
-		if strings.TrimSpace(issue.Model) != "" {
-			metadataBadges = append(metadataBadges, badge(issue.Model, "60"))
-		}
-		second := fmt.Sprintf("  %s · %s", strings.Join(metadataBadges, " "), readableTime(issue.UpdatedAt))
-		second = truncate(second, innerWidth)
-		if selected {
-			first = selectedStyle.Render(padRight(truncate(first, innerWidth), innerWidth))
-			second = selectedStyle.Render(padRight(second, innerWidth))
-		} else {
-			first = truncate(first, innerWidth)
-			second = subtleStyle.Render(second)
-		}
-		lines = append(lines, first, second)
+		lines = append(lines, m.renderListIssue(m.issues[i], i == m.selected, innerWidth)...)
 	}
 	if end < len(m.issues) {
 		lines = append(lines, subtleStyle.Render(fmt.Sprintf("↓ %d more", len(m.issues)-end)))
@@ -563,11 +545,12 @@ func (m Model) detailPrefixLines(issue issues.Issue, width int) []string {
 	if strings.TrimSpace(issue.Model) != "" {
 		metadataBadges = append(metadataBadges, badge(issue.Model, "60"))
 	}
-	lines := []string{
-		titleStyle.Render(truncate(fmt.Sprintf("#%d %s", issue.ID, issue.Title), width)),
-		strings.Join(metadataBadges, " "),
-		"",
+	titleLines := wrapText(fmt.Sprintf("#%d %s", issue.ID, issue.Title), width)
+	lines := make([]string, 0, len(titleLines)+2)
+	for _, line := range titleLines {
+		lines = append(lines, titleStyle.Render(line))
 	}
+	lines = append(lines, strings.Join(metadataBadges, " "), "")
 	meta := []string{
 		fmt.Sprintf("State:    %s", blankDefault(issue.State, "unknown")),
 		fmt.Sprintf("Status:   %s", blankDefault(issue.Status, "no-status")),
@@ -684,8 +667,17 @@ func (m Model) footerLines(width int) []string {
 }
 
 func (m Model) visibleListItems() int {
-	_, height := m.contentMetrics()
-	return max(1, (height-2)/2)
+	bodyWidth := max(20, m.width)
+	paneHeight := max(6, m.height-len(m.footerLines(bodyWidth)))
+	listWidth, _ := m.paneWidths(bodyWidth)
+	innerWidth := max(1, listWidth-paneStyle.GetHorizontalFrameSize())
+	innerHeight := max(1, paneHeight-paneStyle.GetVerticalFrameSize())
+	rowHeights := make([]int, len(m.issues))
+	for i, issue := range m.issues {
+		rowHeights[i] = m.listIssueHeight(issue, innerWidth)
+	}
+	start, end := listWindow(m.selected, rowHeights, innerHeight-1)
+	return max(1, end-start)
 }
 
 func (m Model) detailViewportHeight() int {
@@ -709,6 +701,94 @@ func (m Model) maxDetailScroll() int {
 	}
 	innerWidth, innerHeight := m.contentMetrics()
 	return max(0, len(m.detailLines(innerWidth))-innerHeight)
+}
+
+// renderListIssue renders a complete title on one or more lines followed by metadata.
+func (m Model) renderListIssue(issue issues.Issue, selected bool, width int) []string {
+	cursor := " "
+	if selected {
+		cursor = "›"
+	}
+	titleLines := wrapText(fmt.Sprintf("%s #%d %s", cursor, issue.ID, issue.Title), width)
+	lines := make([]string, 0, len(titleLines)+1)
+	for _, line := range titleLines {
+		if selected {
+			lines = append(lines, selectedStyle.Render(padRight(line, width)))
+		} else {
+			lines = append(lines, line)
+		}
+	}
+
+	metadataBadges := []string{badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking))}
+	if strings.TrimSpace(issue.Model) != "" {
+		metadataBadges = append(metadataBadges, badge(issue.Model, "60"))
+	}
+	metadata := truncate(fmt.Sprintf("  %s · %s", strings.Join(metadataBadges, " "), readableTime(issue.UpdatedAt)), width)
+	if selected {
+		lines = append(lines, selectedStyle.Render(padRight(metadata, width)))
+	} else {
+		lines = append(lines, subtleStyle.Render(metadata))
+	}
+	return lines
+}
+
+func (m Model) listIssueHeight(issue issues.Issue, width int) int {
+	return len(wrapText(fmt.Sprintf("  #%d %s", issue.ID, issue.Title), width)) + 1
+}
+
+// listWindow returns an issue range whose variable-height rows fit in height.
+// It always includes selected when at least one issue exists.
+func listWindow(selected int, rowHeights []int, height int) (int, int) {
+	if len(rowHeights) == 0 {
+		return 0, 0
+	}
+	selected = clamp(selected, 0, len(rowHeights)-1)
+	height = max(1, height)
+	start, end := selected, selected+1
+	used := rowHeights[selected]
+	if start > 0 {
+		used++
+	}
+	if end < len(rowHeights) {
+		used++
+	}
+	for {
+		added := false
+		// Prefer the row before the selection so the selected row does not
+		// continually sit at the top while navigating down the list.
+		for _, candidate := range []struct{ start, end int }{{start - 1, end}, {start, end + 1}} {
+			if candidate.start < 0 || candidate.end > len(rowHeights) {
+				continue
+			}
+			candidateUsed := used
+			if candidate.start < start {
+				candidateUsed += rowHeights[candidate.start]
+			} else {
+				candidateUsed += rowHeights[candidate.end-1]
+			}
+			if candidate.start > 0 {
+				candidateUsed++
+			}
+			if candidate.end < len(rowHeights) {
+				candidateUsed++
+			}
+			if start > 0 {
+				candidateUsed--
+			}
+			if end < len(rowHeights) {
+				candidateUsed--
+			}
+			if candidateUsed <= height {
+				start, end, used = candidate.start, candidate.end, candidateUsed
+				added = true
+				break
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	return start, end
 }
 
 func listWindowStart(selected, total, visible int) int {
