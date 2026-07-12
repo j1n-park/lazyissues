@@ -235,13 +235,29 @@ line 06`)
 	model.focus = focusDetail
 	sections := model.selectedIssueSectionLines()
 	model.detailScroll = sections[0].StartLine
+	model = updateModelWithKey(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	if got, want := model.detailScroll, 0; got != want {
+		t.Fatalf("[ detailScroll = %d, want detail top %d", got, want)
+	}
+	model = updateModelWithKey(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	if got, want := model.detailScroll, 0; got != want {
+		t.Fatalf("[ at detail top moved to %d, want %d", got, want)
+	}
+	model = updateModelWithKey(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if got, want := model.detailScroll, sections[0].StartLine; got != want {
+		t.Fatalf("] detailScroll = %d, want first section line %d", got, want)
+	}
 	model = updateModelWithKey(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
 	if got, want := model.detailScroll, sections[1].StartLine; got != want {
 		t.Fatalf("] detailScroll = %d, want next section line %d", got, want)
 	}
-	model = updateModelWithKey(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
-	if got, want := model.detailScroll, sections[0].StartLine; got != want {
-		t.Fatalf("[ detailScroll = %d, want previous section line %d", got, want)
+	model = updateModelWithKey(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if got, want := model.detailScroll, sections[2].StartLine; got != want {
+		t.Fatalf("] did not reach final heading: detailScroll = %d, want %d", got, want)
+	}
+	model = updateModelWithKey(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if got, want := model.detailScroll, sections[2].StartLine; got != want {
+		t.Fatalf("] at final heading moved to %d, want it to stay at %d", got, want)
 	}
 }
 

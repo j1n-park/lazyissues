@@ -289,26 +289,35 @@ func (m *Model) moveDetailSection(delta int) {
 		return
 	}
 
+	// The top of the detail pane is a navigation stop before the first heading.
+	targets := make([]int, 0, len(sections)+1)
+	targets = append(targets, 0)
+	for _, section := range sections {
+		if section.StartLine > targets[len(targets)-1] {
+			targets = append(targets, section.StartLine)
+		}
+	}
+
 	current := m.detailScroll
-	selected := sections[0]
+	selected := targets[0]
 	if delta > 0 {
-		selected = sections[len(sections)-1]
-		for _, section := range sections {
-			if section.StartLine > current {
-				selected = section
+		selected = targets[len(targets)-1]
+		for _, target := range targets {
+			if target > current {
+				selected = target
 				break
 			}
 		}
 	} else {
-		for i := len(sections) - 1; i >= 0; i-- {
-			if sections[i].StartLine < current {
-				selected = sections[i]
+		for i := len(targets) - 1; i >= 0; i-- {
+			if targets[i] < current {
+				selected = targets[i]
 				break
 			}
 		}
 	}
 
-	m.detailScroll = selected.StartLine
+	m.detailScroll = selected
 	m.clampDetailScroll()
 }
 
