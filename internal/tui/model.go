@@ -24,23 +24,44 @@ const (
 	minListWidth        = 28
 	maxListWidth        = 52
 	autoRefreshInterval = time.Second
+
+	colorBackground         = "#1a1b26"
+	colorForeground         = "#c0caf5"
+	colorBorder             = "#414868"
+	colorFocusedBorder      = "#7aa2f7"
+	colorSubtle             = "#565f89"
+	colorHelp               = "#a9b1d6"
+	colorSelectedBackground = "#283457"
+	colorError              = "#f7768e"
+	colorLabel              = "#7dcfff"
+
+	colorBadgeOpen       = "#24606f"
+	colorBadgeDefault    = "#414868"
+	colorBadgeUnknown    = "#60458c"
+	colorBadgeTodo       = "#304f8a"
+	colorBadgeInProgress = "#695a32"
+	colorBadgeBlocked    = "#713b50"
+	colorBadgeDone       = "#42643d"
+	colorBadgeModel      = "#3b4261"
 )
 
 var (
-	appStyle = lipgloss.NewStyle()
+	appStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colorForeground)).Background(lipgloss.Color(colorBackground))
 
 	paneStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(colorForeground)).
+			Background(lipgloss.Color(colorBackground)).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240"))
+			BorderForeground(lipgloss.Color(colorBorder))
 
-	focusedPaneStyle = paneStyle.Copy().BorderForeground(lipgloss.Color("39"))
+	focusedPaneStyle = paneStyle.Copy().BorderForeground(lipgloss.Color(colorFocusedBorder))
 
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-	subtleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("238")).Bold(true)
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
-	labelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true)
+	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorForeground))
+	subtleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(colorSubtle))
+	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colorForeground)).Background(lipgloss.Color(colorSelectedBackground)).Bold(true)
+	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(colorHelp))
+	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(colorError)).Bold(true)
+	labelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(colorLabel)).Bold(true)
 )
 
 // LoadIssuesFunc reloads the issues currently displayed by the TUI.
@@ -450,7 +471,7 @@ func (m Model) detailLines(width int) []string {
 func (m Model) detailPrefixLines(issue issues.Issue, width int) []string {
 	metadataBadges := []string{badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking))}
 	if strings.TrimSpace(issue.Model) != "" {
-		metadataBadges = append(metadataBadges, badge(issue.Model, "60"))
+		metadataBadges = append(metadataBadges, badge(issue.Model, colorBadgeModel))
 	}
 	titleLines := wrapText(fmt.Sprintf("#%d %s", issue.ID, issue.Title), width)
 	lines := make([]string, 0, len(titleLines)+2)
@@ -594,7 +615,7 @@ func (m Model) renderListIssue(issue issues.Issue, selected bool, width int) []s
 
 	metadataBadges := []string{badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking))}
 	if strings.TrimSpace(issue.Model) != "" {
-		metadataBadges = append(metadataBadges, badge(issue.Model, "60"))
+		metadataBadges = append(metadataBadges, badge(issue.Model, colorBadgeModel))
 	}
 	metadata := truncate(fmt.Sprintf("  %s · %s", strings.Join(metadataBadges, " "), readableTime(issue.UpdatedAt)), width)
 	if selected {
@@ -679,45 +700,45 @@ func listWindowStart(selected, total, visible int) int {
 }
 
 func badge(text, color string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color(color)).Padding(0, 1).Render(strings.ToUpper(text))
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(colorForeground)).Background(lipgloss.Color(color)).Padding(0, 1).Render(strings.ToUpper(text))
 }
 
 func stateColor(state string) string {
 	switch strings.ToLower(state) {
 	case "open":
-		return "36"
+		return colorBadgeOpen
 	case "closed":
-		return "240"
+		return colorBadgeDefault
 	default:
-		return "99"
+		return colorBadgeUnknown
 	}
 }
 
 func statusColor(status string) string {
 	switch strings.ToLower(status) {
 	case "todo":
-		return "63"
+		return colorBadgeTodo
 	case "in_progress":
-		return "33"
+		return colorBadgeInProgress
 	case "blocked":
-		return "196"
+		return colorBadgeBlocked
 	case "done":
-		return "35"
+		return colorBadgeDone
 	default:
-		return "244"
+		return colorBadgeDefault
 	}
 }
 
 func thinkingColor(thinking string) string {
 	switch strings.ToLower(strings.TrimSpace(thinking)) {
 	case "low":
-		return "245"
+		return colorBadgeDefault
 	case "medium":
-		return "99"
+		return colorBadgeUnknown
 	case "high":
-		return "201"
+		return colorBadgeBlocked
 	default:
-		return "244"
+		return colorBadgeDefault
 	}
 }
 

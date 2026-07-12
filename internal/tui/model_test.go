@@ -13,6 +13,43 @@ import (
 	"lazyissues/internal/issues"
 )
 
+func TestTokyoNightPaletteBadgeColors(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"open state", stateColor("open"), "#24606f"},
+		{"closed state", stateColor("closed"), "#414868"},
+		{"unknown state", stateColor("unknown"), "#60458c"},
+		{"todo status", statusColor("todo"), "#304f8a"},
+		{"in-progress status", statusColor("in_progress"), "#695a32"},
+		{"blocked status", statusColor("blocked"), "#713b50"},
+		{"done status", statusColor("done"), "#42643d"},
+		{"default status", statusColor(""), "#414868"},
+		{"low thinking", thinkingColor("low"), "#414868"},
+		{"medium thinking", thinkingColor("medium"), "#60458c"},
+		{"high thinking", thinkingColor("high"), "#713b50"},
+		{"default thinking", thinkingColor(""), "#414868"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("badge color = %q, want %q", tt.got, tt.want)
+			}
+		})
+	}
+
+	if got := appStyle.GetBackground(); got != lipgloss.Color("#1a1b26") {
+		t.Errorf("app background = %v, want #1a1b26", got)
+	}
+	if got := paneStyle.GetForeground(); got != lipgloss.Color("#c0caf5") {
+		t.Errorf("pane foreground = %v, want #c0caf5", got)
+	}
+	if got := paneStyle.GetBackground(); got != lipgloss.Color("#1a1b26") {
+		t.Errorf("pane background = %v, want #1a1b26", got)
+	}
+}
+
 func TestViewRendersReadableStatusesAndHelp(t *testing.T) {
 	model := NewModel(renderFixtureIssues(), "./example_issues.db").WithSize(120, 28)
 	model.selected = 2
