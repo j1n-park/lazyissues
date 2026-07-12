@@ -20,12 +20,12 @@ const (
 )
 
 var issueBodyHeadingStyles = []lipgloss.Style{
-	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("57")).Bold(true),
-	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("24")).Bold(true),
-	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("30")).Bold(true),
-	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("59")).Bold(true),
-	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("60")).Bold(true),
-	lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("238")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(lipgloss.Color("#f7768e")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(lipgloss.Color("#7aa2f7")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(lipgloss.Color("#bb9af7")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(lipgloss.Color("#7dcfff")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(lipgloss.Color("#9ece6a")).Bold(true),
+	lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Background(lipgloss.Color("#e0af68")).Bold(true),
 }
 
 type issueBodyBlock struct {
