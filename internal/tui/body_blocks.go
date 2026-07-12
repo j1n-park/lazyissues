@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -12,11 +11,6 @@ type issueBodyBlockKind int
 const (
 	issueBodyTextBlock issueBodyBlockKind = iota
 	issueBodyHeadingBlock
-)
-
-const (
-	issueBodyHeadingMarker          = "▾"
-	issueBodyCollapsedHeadingMarker = "▸"
 )
 
 var issueBodyHeadingStyles = []lipgloss.Style{
@@ -34,26 +28,6 @@ type issueBodyBlock struct {
 	Text    string
 	RawLine string
 	Lines   []string
-}
-
-type issueBodySectionID string
-
-func issueBodyHeadingSectionID(block issueBodyBlock, ordinal int) issueBodySectionID {
-	return issueBodySectionID(fmt.Sprintf("heading:%d:%d:%s", ordinal, block.Level, block.RawLine))
-}
-
-func issueBodySectionIDs(body string) []issueBodySectionID {
-	blocks := parseIssueBodyBlocks(body)
-	sectionIDs := make([]issueBodySectionID, 0)
-	headingOrdinal := 0
-	for _, block := range blocks {
-		if block.Kind != issueBodyHeadingBlock {
-			continue
-		}
-		headingOrdinal++
-		sectionIDs = append(sectionIDs, issueBodyHeadingSectionID(block, headingOrdinal))
-	}
-	return sectionIDs
 }
 
 func parseIssueBodyBlocks(body string) []issueBodyBlock {
@@ -115,39 +89,17 @@ func parseIssueBodyBlocks(body string) []issueBodyBlock {
 }
 
 func renderIssueBodyLines(body string, width int) []string {
-	return renderIssueBodyLinesWithCollapse(body, width, nil)
-}
-
-func renderIssueBodyLinesWithCollapse(body string, width int, isCollapsed func(issueBodySectionID) bool) []string {
 	blocks := parseIssueBodyBlocks(body)
 	if len(blocks) == 0 {
 		return nil
 	}
 
 	var lines []string
-	headingOrdinal := 0
-	collapsedLevel := 0
 	for _, block := range blocks {
 		switch block.Kind {
 		case issueBodyHeadingBlock:
-			headingOrdinal++
-			if collapsedLevel > 0 {
-				if block.Level > collapsedLevel {
-					continue
-				}
-				collapsedLevel = 0
-			}
-
-			sectionID := issueBodyHeadingSectionID(block, headingOrdinal)
-			collapsed := isCollapsed != nil && isCollapsed(sectionID)
-			lines = append(lines, renderIssueBodyHeadingLinesWithMarker(block, width, headingMarker(collapsed))...)
-			if collapsed {
-				collapsedLevel = block.Level
-			}
+			lines = append(lines, renderIssueBodyHeadingLines(block, width)...)
 		case issueBodyTextBlock:
-			if collapsedLevel > 0 {
-				continue
-			}
 			lines = append(lines, wrapText(strings.Join(block.Lines, "\n"), width)...)
 		}
 	}
@@ -155,37 +107,18 @@ func renderIssueBodyLinesWithCollapse(body string, width int, isCollapsed func(i
 }
 
 func renderIssueBodyHeadingLines(block issueBodyBlock, width int) []string {
-	return renderIssueBodyHeadingLinesWithMarker(block, width, issueBodyHeadingMarker)
-}
-
-func renderIssueBodyHeadingLinesWithMarker(block issueBodyBlock, width int, marker string) []string {
 	width = max(1, width)
-	prefix := marker + " "
-	continuationPrefix := strings.Repeat(" ", lipgloss.Width(prefix))
-	text := strings.TrimSpace(block.Text)
-	contentWidth := max(1, width-lipgloss.Width(prefix))
-	wrapped := wrapText(text, contentWidth)
+	wrapped := wrapText(strings.TrimSpace(block.Text), width)
 	if len(wrapped) == 0 {
 		wrapped = []string{""}
 	}
 
 	style := issueBodyHeadingStyle(block.Level).Width(width)
 	lines := make([]string, 0, len(wrapped))
-	for i, line := range wrapped {
-		linePrefix := prefix
-		if i > 0 {
-			linePrefix = continuationPrefix
-		}
-		lines = append(lines, style.Render(truncate(linePrefix+line, width)))
+	for _, line := range wrapped {
+		lines = append(lines, style.Render(truncate(line, width)))
 	}
 	return lines
-}
-
-func headingMarker(collapsed bool) string {
-	if collapsed {
-		return issueBodyCollapsedHeadingMarker
-	}
-	return issueBodyHeadingMarker
 }
 
 func issueBodyHeadingStyle(level int) lipgloss.Style {

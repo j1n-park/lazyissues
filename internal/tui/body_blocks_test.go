@@ -69,7 +69,7 @@ After`)
 
 	want := []string{
 		"Intro words wrap normally",
-		"▾ Heading",
+		"Heading",
 		"Details line",
 		"~~~md",
 		"## code heading stays text",
@@ -91,7 +91,7 @@ func TestRenderIssueBodyLinesWrapsHeadingWithStyledContinuation(t *testing.T) {
 		stripped = append(stripped, strings.TrimRight(stripANSI(line), " "))
 	}
 
-	want := []string{"▾ A very", "  long", "  section", "  heading"}
+	want := []string{"A very long", "section", "heading"}
 	if !reflect.DeepEqual(stripped, want) {
 		t.Fatalf("renderIssueBodyLines() stripped = %#v, want %#v", stripped, want)
 	}

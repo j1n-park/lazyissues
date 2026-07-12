@@ -55,22 +55,16 @@ type refreshIssuesMsg struct {
 
 // Model is the read-only lazyissues Bubble Tea model.
 type Model struct {
-	issues            []issues.Issue
-	dbPath            string
-	loadIssues        LoadIssuesFunc
-	selected          int
-	detailScroll      int
-	width             int
-	height            int
-	showHelp          bool
-	focus             focusPane
-	err               error
-	collapsedSections map[issueSectionKey]bool
-}
-
-type issueSectionKey struct {
-	issueID   int64
-	sectionID issueBodySectionID
+	issues       []issues.Issue
+	dbPath       string
+	loadIssues   LoadIssuesFunc
+	selected     int
+	detailScroll int
+	width        int
+	height       int
+	showHelp     bool
+	focus        focusPane
+	err          error
 }
 
 // NewModel creates a read-only TUI model for browsing issues.
@@ -120,38 +114,6 @@ func (m Model) selectedIssue() (issues.Issue, bool) {
 		return issues.Issue{}, false
 	}
 	return m.issues[m.selected], true
-}
-
-func (m Model) sectionCollapsed(issueID int64, sectionID issueBodySectionID) bool {
-	return m.collapsedSections[issueSectionKey{issueID: issueID, sectionID: sectionID}]
-}
-
-func (m *Model) setSelectedSectionCollapsed(sectionID issueBodySectionID, collapsed bool) {
-	issue, ok := m.selectedIssue()
-	if !ok {
-		m.detailScroll = 0
-		return
-	}
-	m.setSectionCollapsed(issue.ID, sectionID, collapsed)
-}
-
-func (m *Model) setSectionCollapsed(issueID int64, sectionID issueBodySectionID, collapsed bool) {
-	if sectionID == "" {
-		return
-	}
-	key := issueSectionKey{issueID: issueID, sectionID: sectionID}
-	if collapsed {
-		if m.collapsedSections == nil {
-			m.collapsedSections = make(map[issueSectionKey]bool)
-		}
-		m.collapsedSections[key] = true
-	} else if m.collapsedSections != nil {
-		delete(m.collapsedSections, key)
-		if len(m.collapsedSections) == 0 {
-			m.collapsedSections = nil
-		}
-	}
-	m.clampDetailScroll()
 }
 
 // WithSize returns a copy of the model sized for static rendering or tests.
@@ -274,15 +236,6 @@ func (m *Model) updateListNavigation(key string) {
 
 func (m *Model) updateDetailNavigation(key string) {
 	switch key {
-	case "enter", " ":
-		m.toggleSectionAtDetailScroll()
-		return
-	case "a":
-		m.setAllSelectedSectionsCollapsed(false)
-		return
-	case "z":
-		m.setAllSelectedSectionsCollapsed(true)
-		return
 	case "[":
 		m.moveDetailSection(-1)
 		return
@@ -305,50 +258,6 @@ func (m *Model) updateDetailNavigation(key string) {
 		m.detailScroll = 0
 	case "end":
 		m.detailScroll = m.maxDetailScroll()
-	}
-	m.clampDetailScroll()
-}
-
-func (m *Model) toggleSectionAtDetailScroll() {
-	issue, ok := m.selectedIssue()
-	if !ok {
-		return
-	}
-
-	sections := m.selectedIssueSectionLines()
-	if len(sections) == 0 {
-		return
-	}
-
-	section := issueBodySectionLineAtOrBefore(sections, m.detailScroll)
-	m.setSelectedSectionCollapsed(section.ID, !m.sectionCollapsed(issue.ID, section.ID))
-}
-
-func (m *Model) setAllSelectedSectionsCollapsed(collapsed bool) {
-	issue, ok := m.selectedIssue()
-	if !ok {
-		m.detailScroll = 0
-		return
-	}
-
-	sectionIDs := issueBodySectionIDs(issue.Body)
-	if len(sectionIDs) == 0 {
-		return
-	}
-
-	if collapsed && m.collapsedSections == nil {
-		m.collapsedSections = make(map[issueSectionKey]bool, len(sectionIDs))
-	}
-	for _, sectionID := range sectionIDs {
-		key := issueSectionKey{issueID: issue.ID, sectionID: sectionID}
-		if collapsed {
-			m.collapsedSections[key] = true
-		} else if m.collapsedSections != nil {
-			delete(m.collapsedSections, key)
-		}
-	}
-	if len(m.collapsedSections) == 0 {
-		m.collapsedSections = nil
 	}
 	m.clampDetailScroll()
 }
@@ -533,9 +442,7 @@ func (m Model) detailLines(width int) []string {
 	if body == "" {
 		lines = append(lines, subtleStyle.Render("(empty body)"))
 	} else {
-		lines = append(lines, renderIssueBodyLinesWithCollapse(body, width, func(sectionID issueBodySectionID) bool {
-			return m.sectionCollapsed(issue.ID, sectionID)
-		})...)
+		lines = append(lines, renderIssueBodyLines(body, width)...)
 	}
 	return lines
 }
@@ -581,7 +488,6 @@ func (m Model) detailPrefixLines(issue issues.Issue, width int) []string {
 }
 
 type issueBodySectionLine struct {
-	ID        issueBodySectionID
 	StartLine int
 	EndLine   int
 }
@@ -599,53 +505,20 @@ func (m Model) selectedIssueSectionLines() []issueBodySectionLine {
 	width, _ := m.contentMetrics()
 	line := len(m.detailPrefixLines(issue, width))
 	sections := make([]issueBodySectionLine, 0)
-	headingOrdinal := 0
-	collapsedLevel := 0
 	for _, block := range parseIssueBodyBlocks(body) {
 		switch block.Kind {
 		case issueBodyHeadingBlock:
-			headingOrdinal++
-			if collapsedLevel > 0 {
-				if block.Level > collapsedLevel {
-					continue
-				}
-				collapsedLevel = 0
-			}
-
-			sectionID := issueBodyHeadingSectionID(block, headingOrdinal)
-			collapsed := m.sectionCollapsed(issue.ID, sectionID)
-			headingLines := renderIssueBodyHeadingLinesWithMarker(block, width, headingMarker(collapsed))
+			headingLines := renderIssueBodyHeadingLines(block, width)
 			sections = append(sections, issueBodySectionLine{
-				ID:        sectionID,
 				StartLine: line,
 				EndLine:   line + max(1, len(headingLines)) - 1,
 			})
 			line += len(headingLines)
-			if collapsed {
-				collapsedLevel = block.Level
-			}
 		case issueBodyTextBlock:
-			if collapsedLevel > 0 {
-				continue
-			}
 			line += len(wrapText(strings.Join(block.Lines, "\n"), width))
 		}
 	}
 	return sections
-}
-
-func issueBodySectionLineAtOrBefore(sections []issueBodySectionLine, line int) issueBodySectionLine {
-	selected := sections[0]
-	for _, section := range sections {
-		if line < section.StartLine {
-			return selected
-		}
-		selected = section
-		if line <= section.EndLine {
-			return selected
-		}
-	}
-	return selected
 }
 
 func (m Model) footerLines(width int) []string {
@@ -653,13 +526,13 @@ func (m Model) footerLines(width int) []string {
 	if m.focus == focusDetail {
 		focus = "detail"
 	}
-	base := fmt.Sprintf("tab/h/l focus • j/k/↑/↓ navigate • pgup/pgdn/home/end • enter/space toggle • a/z all • ? help • q quit • focus: %s", focus)
+	base := fmt.Sprintf("tab/h/l focus • j/k/↑/↓ navigate • pgup/pgdn/home/end • [/] headings • ? help • q quit • focus: %s", focus)
 	lines := []string{helpStyle.Render(truncate(base, width))}
 	if m.showHelp {
 		lines = append(lines,
 			helpStyle.Render(truncate("List focus: move between issues. Detail focus: scroll selected issue body.", width)),
 			helpStyle.Render(truncate("Issues automatically refresh every second from the configured database.", width)),
-			helpStyle.Render(truncate("Detail sections: enter/space toggle, [/] previous/next, a expand all, z collapse all.", width)),
+			helpStyle.Render(truncate("Detail sections: [/] previous/next heading.", width)),
 			helpStyle.Render(truncate("Read-only browser: no issue actions mutate the database.", width)),
 		)
 	}

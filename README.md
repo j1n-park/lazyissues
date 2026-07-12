@@ -107,9 +107,6 @@ Run it from the root of a project that uses the local pi issue queue, or pass `-
 
 When the detail pane is focused and the selected issue body contains Markdown-like headings:
 
-- `Enter` / `Space`: toggle the section at or above the current detail scroll position.
-- `a`: expand all sections in the selected issue body.
-- `z`: collapse all sections in the selected issue body.
 - `[` / `]`: jump to the previous/next section heading.
 
 The footer always shows the current focus and a compact keybinding reminder.
@@ -118,9 +115,7 @@ The footer always shows the current focus and a compact keybinding reminder.
 
 Issue bodies are stored and read as plain text. They are commonly written in a Markdown style, but `lazyissues` does not implement full Markdown rendering.
 
-For readability, the detail pane recognizes Markdown-like ATX headings (`# Heading` through `###### Heading`) as issue body sections. Recognized headings are rendered as colored section headers with disclosure markers (`▾` expanded, `▸` collapsed). Collapsing a section hides its text and lower-level subsections until the next heading at the same or higher level.
-
-Collapse state is read-only UI state held in memory for the current TUI session. Toggling sections never changes the issue body or writes anything back to the SQLite database.
+For readability, the detail pane recognizes Markdown-like ATX headings (`# Heading` through `###### Heading`) as issue body sections. Recognized headings are rendered as colored section headers, and all issue body content remains visible.
 
 ## Rendering states
 
