@@ -81,18 +81,24 @@ func TestViewRendersReadableStatusesAndHelp(t *testing.T) {
 	}
 }
 
-func TestViewRendersDelegationModelOnlyWhenPresent(t *testing.T) {
+func TestListModelBadgeOmitsProviderPrefix(t *testing.T) {
 	withModel := issues.Issue{ID: 1, Title: "delegated", State: "open", Model: "openai/gpt-5", CreatedAt: "2026-01-01", UpdatedAt: "2026-01-02"}
-	view := stripANSI(NewModel([]issues.Issue{withModel}, "test.db").WithSize(120, 20).View())
-	for _, want := range []string{"OPENAI/GPT-5", "Model:    openai/gpt-5"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("View() missing %q:\n%s", want, view)
-		}
+	list := stripANSI(strings.Join(NewModel(nil, "test.db").renderListIssue(withModel, false, 100), "\n"))
+	if !strings.Contains(list, "GPT-5") {
+		t.Fatalf("list model badge missing model name:\n%s", list)
+	}
+	if strings.Contains(list, "OPENAI/GPT-5") {
+		t.Fatalf("list model badge rendered provider prefix:\n%s", list)
+	}
+
+	detail := stripANSI(strings.Join(NewModel(nil, "test.db").detailPrefixLines(withModel, 100), "\n"))
+	if !strings.Contains(detail, "Model:    openai/gpt-5") {
+		t.Fatalf("detail model metadata changed:\n%s", detail)
 	}
 
 	withoutModel := withModel
 	withoutModel.Model = ""
-	view = stripANSI(NewModel([]issues.Issue{withoutModel}, "test.db").WithSize(120, 20).View())
+	view := stripANSI(NewModel([]issues.Issue{withoutModel}, "test.db").WithSize(120, 20).View())
 	if strings.Contains(view, "Model:") {
 		t.Fatalf("View() rendered empty model metadata:\n%s", view)
 	}

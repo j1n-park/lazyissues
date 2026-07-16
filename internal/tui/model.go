@@ -624,7 +624,7 @@ func (m Model) renderListIssue(issue issues.Issue, selected bool, width int) []s
 
 	metadataBadges := []string{badge(issue.State, stateColor(issue.State)), badge(blankDefault(issue.Status, "no-status"), statusColor(issue.Status)), badge(blankDefault(issue.Thinking, "no-thinking"), thinkingColor(issue.Thinking))}
 	if strings.TrimSpace(issue.Model) != "" {
-		metadataBadges = append(metadataBadges, badge(issue.Model, colorBadgeModel))
+		metadataBadges = append(metadataBadges, badge(listModelBadgeLabel(issue.Model), colorBadgeModel))
 	}
 	metadata := truncate(fmt.Sprintf("  %s · %s", strings.Join(metadataBadges, " "), readableTime(issue.UpdatedAt)), width)
 	if selected {
@@ -706,6 +706,14 @@ func listWindowStart(selected, total, visible int) int {
 		return total - visible
 	}
 	return start
+}
+
+// listModelBadgeLabel removes the provider portion of a model identifier for list badges.
+func listModelBadgeLabel(model string) string {
+	if index := strings.LastIndex(model, "/"); index >= 0 {
+		return model[index+1:]
+	}
+	return model
 }
 
 func badge(text, color string) string {
